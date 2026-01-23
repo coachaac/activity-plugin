@@ -1,0 +1,62 @@
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        // Version compatible avec Capacitor 7 / Gradle 8.7
+        classpath 'com.android.tools.build:gradle:8.7.0'
+    }
+}
+
+apply plugin: 'com.android.library'
+
+// Le bloc 'android' contient toute la configuration du plugin
+android {
+    // 1. LE NAMESPACE (Indispensable ici pour Gradle 8+)
+    namespace "fr.lelab.activity"
+
+    // 2. Configuration des SDK
+    compileSdk 35
+
+    defaultConfig {
+        minSdk 22
+        // On ne définit pas de targetSdk ici dans un plugin library
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // 3. Options de compilation (Java 17 requis pour Capacitor 7)
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    lintOptions {
+        abortOnError false
+    }
+}
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+dependencies {
+    // Lien dynamique vers le cœur de Capacitor
+    implementation project(':capacitor-android')
+
+    // Google Play Services pour la reconnaissance d'activité
+    implementation 'com.google.android.gms:play-services-location:21.2.0'
+
+    // Dépendances de test
+    testImplementation "junit:junit:4.13.2"
+    androidTestImplementation "androidx.test.ext:junit:1.2.1"
+    androidTestImplementation "androidx.test.espresso:espresso-core:3.6.1"
+}

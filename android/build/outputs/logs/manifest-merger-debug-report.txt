@@ -1,0 +1,42 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:1:1-16:12
+INJECTED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:1:1-16:12
+	package
+		INJECTED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml
+	xmlns:android
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:1:11-69
+uses-permission#android.permission.ACTIVITY_RECOGNITION
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:3:5-79
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:3:22-76
+application
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:5:5-15:19
+receiver#fr.lelab.activity.ActivityTransitionReceiver
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:6:9-10:20
+	android:exported
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:6:62-85
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:6:19-61
+intent-filter#action:name:fr.lelab.activity.ACTION_PROCESS_ACTIVITY_TRANSITIONS
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:7:13-9:29
+action#fr.lelab.activity.ACTION_PROCESS_ACTIVITY_TRANSITIONS
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:8:17-96
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:8:25-93
+service#com.google.android.gms.location.ActivityRecognitionClient
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:11:9-14:40
+	android:enabled
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:13:13-35
+	android:exported
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:14:13-37
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:12:13-85
+uses-sdk
+INJECTED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml
+INJECTED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml
