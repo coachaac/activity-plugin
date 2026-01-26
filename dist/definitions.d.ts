@@ -1,16 +1,16 @@
 import type { PermissionState, PluginListenerHandle } from '@capacitor/core';
 export interface PermissionStatus {
     activity: PermissionState;
+    location: PermissionState;
 }
 export interface ActivityEvent {
-    /**
-     * Type d'activité (correspond au mapping getActivityNameForTs en Java)
-     */
     type: 'walking' | 'running' | 'cycling' | 'automotive' | 'stationary' | 'unknown';
-    /**
-     * Indique si l'utilisateur commence (ENTER) ou arrête (EXIT) l'activité
-     */
     transition: 'ENTER' | 'EXIT';
+}
+export interface GpsLocation {
+    lat: number;
+    lng: number;
+    timestamp: number;
 }
 export interface ActivityRecognitionPlugin {
     checkPermissions(): Promise<PermissionStatus>;
@@ -19,9 +19,27 @@ export interface ActivityRecognitionPlugin {
         interval?: number;
     }): Promise<void>;
     stopTracking(): Promise<void>;
+    /**
+     * Récupère les positions GPS enregistrées en arrière-plan
+     */
+    getSavedLocations(): Promise<{
+        locations: GpsLocation[];
+    }>;
+    /**
+     * Vide le stockage local (JSON/SQLite)
+     */
+    clearSavedLocations(): Promise<void>;
     addListener(eventName: 'activityChange', listenerFunc: (event: ActivityEvent) => void): Promise<PluginListenerHandle>;
     /**
-     * Utile pour nettoyer les écouteurs lors de la destruction d'un composant
+     * Écoute les positions GPS en temps réel (si l'app est au premier plan)
      */
+    addListener(eventName: 'onLocationUpdate', listenerFunc: (event: GpsLocation) => void): Promise<PluginListenerHandle>;
     removeAllListeners(): Promise<void>;
+    /**
+     * Sur Android : active le BootReceiver.
+     * Sur iOS : cette méthode peut rester vide ou activer le Significant Location Change.
+     */
+    enableAutonomousMode(options: {
+        enabled: boolean;
+    }): Promise<void>;
 }

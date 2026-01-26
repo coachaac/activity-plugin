@@ -1,24 +1,39 @@
 import { WebPlugin } from '@capacitor/core';
-import type { ActivityRecognitionPlugin, PermissionStatus } from './definitions';
+import type { ActivityRecognitionPlugin, PermissionStatus, GpsLocation } from './definitions';
 
 export class ActivityRecognitionWeb extends WebPlugin implements ActivityRecognitionPlugin {
   
   async checkPermissions(): Promise<PermissionStatus> {
-    return { activity: 'denied' };
+    return { 
+      activity: 'granted',
+      location: 'granted' 
+    };
   }
 
   async requestPermissions(): Promise<PermissionStatus> {
-    return { activity: 'denied' };
+    return { 
+      activity: 'granted',
+      location: 'granted' 
+    };
   }
 
-  async startTracking(options?: { interval?: number }): Promise<void> {
-    console.warn('Activity Recognition non disponible sur Web', options);
+  async startTracking(_options?: { interval?: number }): Promise<void> {
+    console.log('Tracking started on web');
   }
 
   async stopTracking(): Promise<void> {
-    console.log('Activity Recognition arrêté');
+    console.log('Tracking stopped on web');
   }
 
-  // On laisse WebPlugin gérer addListener automatiquement. 
-  // Le cast dans definitions.ts suffira à TypeScript.
+  async getSavedLocations(): Promise<{ locations: GpsLocation[] }> {
+    return { locations: [] };
+  }
+
+  async clearSavedLocations(): Promise<void> {
+    console.log('Clear locations on web');
+  }
+
+  async enableAutonomousMode(_options: { enabled: boolean }): Promise<void> {
+    console.log('Autonomous mode toggled');
+  }
 }

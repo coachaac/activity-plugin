@@ -1,37 +1,106 @@
 -- Merging decision tree log ---
 manifest
-ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:1:1-16:12
-INJECTED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:1:1-16:12
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:2:1-54:12
+INJECTED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:2:1-54:12
 	package
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:3:5-32
 		INJECTED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml
 	xmlns:android
-		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:1:11-69
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:2:11-69
 uses-permission#android.permission.ACTIVITY_RECOGNITION
-ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:3:5-79
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:5:5-79
 	android:name
-		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:3:22-76
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:5:22-76
+uses-permission#com.google.android.gms.permission.ACTIVITY_RECOGNITION
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:6:5-94
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:6:22-91
+uses-permission#android.permission.ACCESS_FINE_LOCATION
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:8:5-79
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:8:22-76
+uses-permission#android.permission.ACCESS_COARSE_LOCATION
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:9:5-81
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:9:22-78
+uses-permission#android.permission.ACCESS_BACKGROUND_LOCATION
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:10:5-85
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:10:22-82
+uses-permission#android.permission.FOREGROUND_SERVICE
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:12:5-77
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:12:22-74
+uses-permission#android.permission.FOREGROUND_SERVICE_LOCATION
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:13:5-86
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:13:22-83
+uses-permission#android.permission.POST_NOTIFICATIONS
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:15:5-77
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:15:22-74
+uses-permission#android.permission.RECEIVE_BOOT_COMPLETED
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:17:5-81
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:17:22-78
+uses-permission#android.permission.WAKE_LOCK
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:18:5-68
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:18:22-65
 application
-ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:5:5-15:19
-receiver#fr.lelab.activity.ActivityTransitionReceiver
-ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:6:9-10:20
-	android:exported
-		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:6:62-85
-	android:name
-		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:6:19-61
-intent-filter#action:name:fr.lelab.activity.ACTION_PROCESS_ACTIVITY_TRANSITIONS
-ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:7:13-9:29
-action#fr.lelab.activity.ACTION_PROCESS_ACTIVITY_TRANSITIONS
-ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:8:17-96
-	android:name
-		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:8:25-93
-service#com.google.android.gms.location.ActivityRecognitionClient
-ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:11:9-14:40
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:20:5-53:19
+service#fr.lelab.activity.TrackingService
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:22:9-27:43
 	android:enabled
-		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:13:13-35
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:25:13-35
 	android:exported
-		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:14:13-37
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:26:13-37
+	android:stopWithTask
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:27:13-40
+	android:foregroundServiceType
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:24:13-53
 	android:name
-		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:12:13-85
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:23:13-44
+receiver#fr.lelab.activity.ActivityTransitionReceiver
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:29:9-36:20
+	android:enabled
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:31:13-35
+	android:exported
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:32:13-37
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:30:13-55
+intent-filter#action:name:fr.lelab.activity.ACTION_PROCESS_ACTIVITY_TRANSITIONS
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:33:13-35:29
+action#fr.lelab.activity.ACTION_PROCESS_ACTIVITY_TRANSITIONS
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:34:17-96
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:34:25-93
+receiver#fr.lelab.activity.BootReceiver
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:38:9-46:20
+	android:enabled
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:40:13-35
+	android:exported
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:41:13-36
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:39:13-41
+intent-filter#action:name:android.intent.action.BOOT_COMPLETED+action:name:android.intent.action.QUICKBOOT_POWERON
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:42:13-45:29
+action#android.intent.action.BOOT_COMPLETED
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:43:17-79
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:43:25-76
+action#android.intent.action.QUICKBOOT_POWERON
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:44:17-82
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:44:25-79
+receiver#fr.lelab.activity.LocationReceiver
+ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:48:9-51:40
+	android:enabled
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:50:13-35
+	android:exported
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:51:13-37
+	android:name
+		ADDED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:49:13-45
 uses-sdk
 INJECTED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml reason: use-sdk injection requested
 INJECTED from /Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml

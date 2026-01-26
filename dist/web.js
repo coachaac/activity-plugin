@@ -1,16 +1,31 @@
 import { WebPlugin } from '@capacitor/core';
 export class ActivityRecognitionWeb extends WebPlugin {
     async checkPermissions() {
-        return { activity: 'denied' };
+        return {
+            activity: 'granted',
+            location: 'granted'
+        };
     }
     async requestPermissions() {
-        return { activity: 'denied' };
+        return {
+            activity: 'granted',
+            location: 'granted'
+        };
     }
-    async startTracking(options) {
-        console.warn('Activity Recognition non disponible sur Web', options);
+    async startTracking(_options) {
+        console.log('Tracking started on web');
     }
     async stopTracking() {
-        console.log('Activity Recognition arrêté');
+        console.log('Tracking stopped on web');
+    }
+    async getSavedLocations() {
+        return { locations: [] };
+    }
+    async clearSavedLocations() {
+        console.log('Clear locations on web');
+    }
+    async enableAutonomousMode(_options) {
+        console.log('Autonomous mode toggled');
     }
 }
 //# sourceMappingURL=web.js.map
