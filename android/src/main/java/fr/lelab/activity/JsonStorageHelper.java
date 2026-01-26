@@ -8,11 +8,14 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat; 
+import java.util.Date;          
+import java.util.Locale;
 
 public class JsonStorageHelper {
     private static final String FILE_NAME = "stored_locations.json";
 
-    // 1. SAUVEGARDE D'UNE POSITION GPS
+    // Save GPS position
     public static synchronized void saveLocation(Context context, double lat, double lng) {
         try {
             JSONArray dataArray = loadData(context);
@@ -29,14 +32,19 @@ public class JsonStorageHelper {
         }
     }
 
-    // 2. SAUVEGARDE D'UN ÉVÉNEMENT D'ACTIVITÉ (Nouveau !)
     public static synchronized void saveActivity(Context context, String activity, String transition) {
         try {
             JSONArray dataArray = loadData(context);
             JSONObject entry = new JSONObject();
+
+            // Format to readable date
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
+            String currentDate = sdf.format(new Date());
+
             entry.put("type", "activity");
             entry.put("activity", activity);     // ex: "automotive"
             entry.put("transition", transition); // ex: "ENTER"
+            entry.put("date", currentDate); // more readable than timestamp
             entry.put("timestamp", System.currentTimeMillis() / 1000.0);
 
             dataArray.put(entry);
@@ -46,7 +54,7 @@ public class JsonStorageHelper {
         }
     }
 
-    // --- MÉTHODES UTILITAIRES INTERNES ---
+    // --- Internal uitlity ---
 
     private static void saveToFile(Context context, JSONArray array) {
         try {
@@ -72,7 +80,7 @@ public class JsonStorageHelper {
         }
     }
 
-    // --- MÉTHODES POUR LE PLUGIN ---
+    // --- PLUGIN Method---
 
     public static JSArray loadLocationsAsJSArray(Context context) {
         try {
