@@ -35,7 +35,7 @@ public class ActivityRecognitionHelper {
             fos.write(entry.getBytes());
             fos.close();
         } catch (Exception e) {
-            android.util.Log.e("StorageHelper", "Erreur écriture log", e);
+            android.util.Log.e("StorageHelper", "log writing Error", e);
         }
     }
 }

@@ -21,7 +21,7 @@ public class LocationReceiver extends BroadcastReceiver {
                                    .getBoolean("is_driving", false);
 
         if (!isDriving) {
-            Log.d("LocationReceiver", "Position ignorée (pas en mode automotive)");
+            Log.d("LocationReceiver", "Ignoired Position(not in automotive mode)");
             return; 
         }
 

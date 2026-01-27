@@ -14,4 +14,5 @@ export declare class ActivityRecognitionWeb extends WebPlugin implements Activit
     enableAutonomousMode(_options: {
         enabled: boolean;
     }): Promise<void>;
+    shareSavedLocations(): Promise<void>;
 }

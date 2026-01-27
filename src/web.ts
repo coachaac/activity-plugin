@@ -36,4 +36,8 @@ export class ActivityRecognitionWeb extends WebPlugin implements ActivityRecogni
   async enableAutonomousMode(_options: { enabled: boolean }): Promise<void> {
     console.log('Autonomous mode toggled');
   }
+
+  async shareSavedLocations(): Promise<void> {
+    console.warn('File sharing not implemented on Web');
+  }
 }

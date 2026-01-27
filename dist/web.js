@@ -27,5 +27,8 @@ export class ActivityRecognitionWeb extends WebPlugin {
     async enableAutonomousMode(_options) {
         console.log('Autonomous mode toggled');
     }
+    async shareSavedLocations() {
+        console.warn('File sharing not implemented on Web');
+    }
 }
 //# sourceMappingURL=web.js.map

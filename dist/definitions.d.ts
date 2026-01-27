@@ -20,24 +20,28 @@ export interface ActivityRecognitionPlugin {
     }): Promise<void>;
     stopTracking(): Promise<void>;
     /**
-     * Récupère les positions GPS enregistrées en arrière-plan
+     * get  GPS position
      */
     getSavedLocations(): Promise<{
         locations: GpsLocation[];
     }>;
     /**
-     * Vide le stockage local (JSON/SQLite)
+     * clear JSON File
      */
     clearSavedLocations(): Promise<void>;
+    /**
+     * share JSON File
+     */
+    shareSavedLocations(): Promise<void>;
     addListener(eventName: 'activityChange', listenerFunc: (event: ActivityEvent) => void): Promise<PluginListenerHandle>;
     /**
-     * Écoute les positions GPS en temps réel (si l'app est au premier plan)
+     * live GPS position (if app foreground)
      */
     addListener(eventName: 'onLocationUpdate', listenerFunc: (event: GpsLocation) => void): Promise<PluginListenerHandle>;
     removeAllListeners(): Promise<void>;
     /**
-     * Sur Android : active le BootReceiver.
-     * Sur iOS : cette méthode peut rester vide ou activer le Significant Location Change.
+     * On Android : active BootReceiver.
+     * On iOS : activate Significant Location Change.
      */
     enableAutonomousMode(options: {
         enabled: boolean;

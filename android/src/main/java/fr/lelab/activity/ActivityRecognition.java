@@ -44,8 +44,8 @@ public class ActivityRecognition {
 
         try {
             activityClient.requestActivityTransitionUpdates(new ActivityTransitionRequest(transitions), activityPendingIntent)
-                .addOnSuccessListener(aVoid -> Log.i(TAG, "Capteurs activés"));
-        } catch (SecurityException e) { Log.e(TAG, "Permission manquante", e); }
+                .addOnSuccessListener(aVoid -> Log.i(TAG, "Sensors activated"));
+        } catch (SecurityException e) { Log.e(TAG, "Missing permission", e); }
     }
 
     public void stopTracking() {

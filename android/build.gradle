@@ -1,34 +1,25 @@
+group 'fr.lelab.activity'
+version '1.0.0'
+
 buildscript {
     repositories {
         google()
         mavenCentral()
     }
     dependencies {
-        // Version compatible avec Capacitor 7 / Gradle 8.7
-        classpath 'com.android.tools.build:gradle:8.7.0'
+        classpath 'com.android.tools.build:gradle:8.2.1'
     }
 }
 
 apply plugin: 'com.android.library'
 
-// Le bloc 'android' contient toute la configuration du plugin
 android {
-    // 1. LE NAMESPACE (Indispensable ici pour Gradle 8+)
     namespace "fr.lelab.activity"
-
-    // 2. Configuration des SDK
-    compileSdk 35
+    compileSdk 34 // Recommandé pour 2026 pour supporter Android 14/15
 
     defaultConfig {
-        minSdk 22
-        // On ne définit pas de targetSdk ici dans un plugin library
+        minSdk 23
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-    }
-
-    // 3. Options de compilation (Java 17 requis pour Capacitor 7)
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
     }
 
     buildTypes {
@@ -38,8 +29,9 @@ android {
         }
     }
 
-    lintOptions {
-        abortOnError false
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 }
 
@@ -49,14 +41,17 @@ repositories {
 }
 
 dependencies {
-    // Lien dynamique vers le cœur de Capacitor
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
     implementation project(':capacitor-android')
+    
+    // Google Play Services pour l'Activité et le GPS
+    implementation "com.google.android.gms:play-services-location:21.3.0"
+    
+    // AndroidX pour les notifications compatibles et le cycle de vie
+    implementation "androidx.core:core:1.12.0"
+    implementation "androidx.appcompat:appcompat:1.6.1"
 
-    // Google Play Services pour la reconnaissance d'activité
-    implementation 'com.google.android.gms:play-services-location:21.2.0'
-
-    // Dépendances de test
     testImplementation "junit:junit:4.13.2"
-    androidTestImplementation "androidx.test.ext:junit:1.2.1"
-    androidTestImplementation "androidx.test.espresso:espresso-core:3.6.1"
+    androidTestImplementation "androidx.test.ext:junit:1.1.5"
+    androidTestImplementation "androidx.test.espresso:espresso-core:3.5.1"
 }

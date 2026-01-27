@@ -5,7 +5,7 @@ import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
-import android.util.Log; // ✅ IMPORT MANQUANT
+import android.util.Log; 
 
 import androidx.core.app.NotificationCompat;
 import com.google.android.gms.location.*;
@@ -18,7 +18,7 @@ public class TrackingService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         createNotificationChannel();
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("SmartPilot")
+                .setContentTitle("Coach AAC")
                 .setContentText("Trajet en cours d'enregistrement...")
                 .setSmallIcon(android.R.drawable.ic_menu_mylocation)
                 .setOngoing(true)

@@ -13,7 +13,7 @@ public class BootReceiver extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
         // On vérifie que l'événement est bien le démarrage du téléphone
         if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
-            Log.i(TAG, "Téléphone démarré, relance du service de suivi...");
+            Log.i(TAG, "Phone switched on, re-launch service...");
 
             Intent serviceIntent = new Intent(context, TrackingService.class);
             
