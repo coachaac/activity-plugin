@@ -4,15 +4,12 @@ export declare class ActivityRecognitionWeb extends WebPlugin implements Activit
     checkPermissions(): Promise<PermissionStatus>;
     requestPermissions(): Promise<PermissionStatus>;
     startTracking(_options?: {
-        interval?: number;
+        debug?: boolean;
     }): Promise<void>;
     stopTracking(): Promise<void>;
     getSavedLocations(): Promise<{
         locations: GpsLocation[];
     }>;
     clearSavedLocations(): Promise<void>;
-    enableAutonomousMode(_options: {
-        enabled: boolean;
-    }): Promise<void>;
     shareSavedLocations(): Promise<void>;
 }

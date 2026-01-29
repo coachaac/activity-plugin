@@ -16,9 +16,14 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     private let stopDelay: TimeInterval = 180 // 3 minutes
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
+    private var debugMode = false
+
     @objc public override func load() {
         locationManager.delegate = self
         locationManager.pausesLocationUpdatesAutomatically = false
+
+        // Optionnal: allow more robust retart if app is closed
+        locationManager.allowsBackgroundLocationUpdates = true
         
         // Réveil automatique si un monitoring était déjà actif
         if CLLocationManager.significantLocationChangeMonitoringAvailable() {
@@ -46,20 +51,36 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         } 
     }  
 
+    private func triggerVibration(double: Bool) {
+        let generator = UIImpactFeedbackGenerator(style: .heavy)
+        generator.prepare()
+        generator.impactOccurred()
+        
+        if double {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                generator.impactOccurred()
+            }
+        }
+    }
+
     private func handleActivityUpdate(_ activity: CMMotionActivity) {
         if activity.automotive {
-            // ✅ On roule : On annule le compte à rebours de coupure
-            stopTimer?.invalidate()
-            stopTimer = nil
-            endBackgroundTask()
+            // ✅ Driving : re-init all
+            self.cancelStopTimer()
             
             if !self.isDriving {
+                print("🚗 Automotive START : GPS High Precision started")
                 self.isDriving = true
                 self.startHighPrecisionGPS()
+
+                // vibrate twice start high precision GPS tracking
+                if debugMode 
+                    { self.triggerVibration(double: true) }
             }
-        } else if activity.stationary || activity.walking {
-            // ⏳ Arrêt ou marche : On lance le timer avant de couper le GPS
+        } else if activity.walking || activity.stationary || activity.cycling {
+            // ⏳ Transition : count down after driving
             if self.isDriving && stopTimer == nil {
+                print("🚶 Activity transition detected : start 3min timer")
                 self.startStopTimer()
             }
         }
@@ -67,7 +88,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
     // MARK: - Protection Timer (Background Task)
     private func startStopTimer() {
-        // Demande du temps à iOS pour que le timer tourne écran éteint
+        // Sécurity : prevent multiple background task
+        self.endBackgroundTask()
+        
+        // Request background to iOS (crucial for Timer)
         self.backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "StopGPSTimer") {
             self.endBackgroundTask()
         }
@@ -75,13 +99,23 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         DispatchQueue.main.async {
             self.stopTimer = Timer.scheduledTimer(withTimeInterval: self.stopDelay, repeats: false) { [weak self] _ in
                 guard let self = self else { return }
-                print("💤 Délai de 3min atteint : arrêt du GPS")
+                print("💤 Délai de 3min reached : switch to low consumption")
                 self.isDriving = false
-                self.stopHighPrecisionGPS()
+                self.stopHighPrecisionGPS() // GSP high precision stop (baterry saving)
                 self.stopTimer = nil
                 self.endBackgroundTask()
+
+                // vibrate once end of high precision GPS tracking
+                if debugMode 
+                    { self.triggerVibration(double: false) }
             }
         }
+    }
+
+    private func cancelStopTimer() {
+        stopTimer?.invalidate()
+        stopTimer = nil
+        endBackgroundTask()
     }
 
     private func endBackgroundTask() {
@@ -95,6 +129,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     private func startHighPrecisionGPS() {
         DispatchQueue.main.async {
             self.locationManager.desiredAccuracy = kCLLocationAccuracyBest
+            self.locationManager.distanceFilter = 10 // no location update if move is less than 10m
             self.locationManager.allowsBackgroundLocationUpdates = true
             if #available(iOS 11.0, *) {
                 self.locationManager.showsBackgroundLocationIndicator = true
@@ -105,16 +140,23 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
     private func stopHighPrecisionGPS() {
         DispatchQueue.main.async {
-            self.locationManager.stopUpdatingLocation()
-            self.locationManager.allowsBackgroundLocationUpdates = false
+            // 🔋 Instead of stop  : switch to low precision to save battery
+            // but stay awake for nex activity change
+            self.locationManager.desiredAccuracy = kCLLocationAccuracyThreeKilometers 
+            self.locationManager.distanceFilter = 99999
+            
             if #available(iOS 11.0, *) {
                 self.locationManager.showsBackgroundLocationIndicator = false
             }
+            // do not stop AllowsBackgroundLocationUpdates to keep monitoring alive
         }
     }
 
     // MARK: - Plugin Methods (Interface JS)
     @objc public func startTracking(_ call: CAPPluginCall) {
+
+        self.debugMode = call.getBool("debug") ?? false
+
         startActivityDetection()
         // Surveillance discrète pour le réveil auto
         locationManager.startMonitoringSignificantLocationChanges()
@@ -147,34 +189,92 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     }
 
     @objc public override func checkPermissions(_ call: CAPPluginCall) {
+        // 1. Activity permission Verification
         var activityStatus = "prompt"
         if #available(iOS 11.0, *) {
             switch CMMotionActivityManager.authorizationStatus() {
-                case .authorized: activityStatus = "granted"
-                case .denied, .restricted: activityStatus = "denied"
-                default: activityStatus = "prompt"
+            case .authorized:
+                activityStatus = "granted"
+            case .denied, .restricted:
+                activityStatus = "denied"
+            case .notDetermined:
+                activityStatus = "prompt"
+            @unknown default:
+                activityStatus = "prompt"
             }
         }
-        let locationStatus = CLLocationManager.authorizationStatus()
+
+        // 2. Location permission verification
+        var locationStatus: CLAuthorizationStatus
+        if #available(iOS 14.0, *) {
+            locationStatus = locationManager.authorizationStatus
+        } else {
+            locationStatus = CLLocationManager.authorizationStatus()
+        }
+
+        var locationResult = "prompt"
+        switch locationStatus {
+        case .authorizedAlways:
+            locationResult = "granted"
+        case .authorizedWhenInUse:
+            // Pour ton app, "Always" est préférable, mais on peut considérer "WhenInUse" 
+            // comme accordé pour le tracking immédiat.
+            locationResult = "authorizedWhenInUse" 
+        case .denied, .restricted:
+            locationResult = "denied"
+        case .notDetermined:
+            locationResult = "prompt"
+        @unknown default:
+            locationResult = "prompt"
+        }
+
+        // 3. Retour des résultats à Capacitor
         call.resolve([
             "activity": activityStatus,
-            "location": locationStatus == .authorizedAlways ? "granted" : "prompt"
+            "location": locationResult
         ])
     }
 
     @objc public override func requestPermissions(_ call: CAPPluginCall) {
-        // Souvent géré par Capacitor, mais nécessaire si déclaré dans le .m
-        call.resolve()
+        // 1. Demande pour le mouvement (CoreMotion)
+        // CoreMotion n'a pas de méthode "request" explicite, 
+        // l'alerte s'affiche automatiquement au premier 'startActivityUpdates'
+        
+        // 2. Demande pour la localisation
+        DispatchQueue.main.async {
+            let status: CLAuthorizationStatus
+            if #available(iOS 14.0, *) {
+                status = self.locationManager.authorizationStatus
+            } else {
+                status = CLLocationManager.authorizationStatus()
+            }
+
+            if status == .notDetermined {
+                // Première demande : on demande "Toujours"
+                // Note: iOS affichera d'abord une alerte "Pendant l'utilisation"
+                self.locationManager.requestAlwaysAuthorization()
+            } else if status == .authorizedWhenInUse {
+                // Si déjà autorisé "Pendant", on tente de promouvoir vers "Toujours"
+                self.locationManager.requestAlwaysAuthorization()
+            }
+            
+            // On répond à Capacitor que la demande est lancée
+            call.resolve(["location": "requested"])
+        }
     }
 
     // MARK: - Delegate Location
     public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        // On enregistre si on conduit OU si on est dans la période de grâce des 3 min
         guard isDriving, let location = locations.last else { return }
         
+        // Filtre de précision (ignore les points trop imprécis > 100m)
+        if location.horizontalAccuracy > 100 { return }
+
         let newPoint: [String: Any] = [
-            "type": "location",
             "lat": location.coordinate.latitude,
             "lng": location.coordinate.longitude,
+            "speed": location.speed, // Utile pour tes futures analyses
             "date": getFormattedDate(),
             "timestamp": location.timestamp.timeIntervalSince1970
         ]

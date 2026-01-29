@@ -17,7 +17,7 @@ export class ActivityRecognitionWeb extends WebPlugin implements ActivityRecogni
     };
   }
 
-  async startTracking(_options?: { interval?: number }): Promise<void> {
+  async startTracking(_options?: { debug?: boolean }): Promise<void> {
     console.log('Tracking started on web');
   }
 
@@ -31,10 +31,6 @@ export class ActivityRecognitionWeb extends WebPlugin implements ActivityRecogni
 
   async clearSavedLocations(): Promise<void> {
     console.log('Clear locations on web');
-  }
-
-  async enableAutonomousMode(_options: { enabled: boolean }): Promise<void> {
-    console.log('Autonomous mode toggled');
   }
 
   async shareSavedLocations(): Promise<void> {

@@ -22,7 +22,7 @@ export interface ActivityRecognitionPlugin {
   requestPermissions(): Promise<PermissionStatus>;
   
   // Modifié pour inclure le tracking GPS
-  startTracking(options?: { interval?: number }): Promise<void>;
+  startTracking(options?: { debug?: boolean }): Promise<void>;
   stopTracking(): Promise<void>;
   
   // --- NOUVELLES MÉTHODES POUR LE STOCKAGE ---
@@ -60,9 +60,4 @@ export interface ActivityRecognitionPlugin {
 
   removeAllListeners(): Promise<void>;
   
-  /**
-   * On Android : active BootReceiver. 
-   * On iOS : activate Significant Location Change.
-   */
-  enableAutonomousMode(options: { enabled: boolean }): Promise<void>;
 }

@@ -1,6 +1,8 @@
 package fr.lelab.activity;
 
 import android.content.Context;
+import android.location.Location;
+import com.getcapacitor.JSObject;
 import com.getcapacitor.JSArray;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -16,13 +18,14 @@ public class JsonStorageHelper {
     private static final String FILE_NAME = "stored_locations.json";
 
     // Save GPS position
-    public static synchronized void saveLocation(Context context, double lat, double lng) {
+    public static synchronized void saveLocation(Context context, double lat, double lng, float speed) {
         try {
             JSONArray dataArray = loadData(context);
             JSONObject entry = new JSONObject();
             entry.put("type", "location");
             entry.put("lat", lat);
             entry.put("lng", lng);
+            entry.put("speed", speed);
             entry.put("timestamp", System.currentTimeMillis() / 1000.0);
 
             dataArray.put(entry);
@@ -94,4 +97,30 @@ public class JsonStorageHelper {
         File file = new File(context.getFilesDir(), FILE_NAME);
         if (file.exists()) file.delete();
     }
+
+
+    /**
+     * Convert Android Location to JSObject to send to App
+     */
+    public static JSObject locationToJSObject(Location location) {
+        JSObject obj = new JSObject();
+        obj.put("lat", location.getLatitude());
+        obj.put("lng", location.getLongitude());
+        obj.put("speed", location.getSpeed()); // speed m/s
+        obj.put("timestamp", location.getTime() / 1000.0);
+        
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
+        obj.put("date", sdf.format(new Date(location.getTime())));
+        
+        return obj;
+    }
+
+    /**
+     * Save  Location Object in the JSON
+     */
+    public static synchronized void saveLocationObject(Context context, Location location) {
+        saveLocation(context, location.getLatitude(), location.getLongitude(), location.getSpeed());
+    }
+
+
 }

@@ -16,7 +16,7 @@ export interface ActivityRecognitionPlugin {
     checkPermissions(): Promise<PermissionStatus>;
     requestPermissions(): Promise<PermissionStatus>;
     startTracking(options?: {
-        interval?: number;
+        debug?: boolean;
     }): Promise<void>;
     stopTracking(): Promise<void>;
     /**
@@ -39,11 +39,4 @@ export interface ActivityRecognitionPlugin {
      */
     addListener(eventName: 'onLocationUpdate', listenerFunc: (event: GpsLocation) => void): Promise<PluginListenerHandle>;
     removeAllListeners(): Promise<void>;
-    /**
-     * On Android : active BootReceiver.
-     * On iOS : activate Significant Location Change.
-     */
-    enableAutonomousMode(options: {
-        enabled: boolean;
-    }): Promise<void>;
 }

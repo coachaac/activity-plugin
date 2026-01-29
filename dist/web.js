@@ -24,9 +24,6 @@ export class ActivityRecognitionWeb extends WebPlugin {
     async clearSavedLocations() {
         console.log('Clear locations on web');
     }
-    async enableAutonomousMode(_options) {
-        console.log('Autonomous mode toggled');
-    }
     async shareSavedLocations() {
         console.warn('File sharing not implemented on Web');
     }
