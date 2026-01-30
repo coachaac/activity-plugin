@@ -6,7 +6,7 @@ export interface PermissionStatus {
 }
 
 export interface ActivityEvent {
-  type: 'walking' | 'running' | 'cycling' | 'automotive' | 'stationary' | 'unknown';
+  activity: 'walking' | 'running' | 'cycling' | 'automotive' | 'stationary' | 'unknown';
   transition: 'ENTER' | 'EXIT';
 }
 

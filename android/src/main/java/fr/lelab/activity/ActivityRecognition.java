@@ -59,24 +59,29 @@ public class ActivityRecognition {
     public void startGPSUpdates() {
         Log.d(TAG, "🚀 Activation du GPS Haute Précision");
         try {
-            // Configuration : Haute précision, 5 secondes entre chaque point
+            // Android 10+ : Pour maintenir ce callback en vie en arrière-plan,
+            // il est recommandé de démarrer un Foreground Service ici si nécessaire.
+            
             LocationRequest locationRequest = new LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000)
-                    .setMinUpdateDistanceMeters(10)
+                    .setMinUpdateDistanceMeters(10) // Ne vibre/sauvegarde que si on a bougé de 10m
+                    .setWaitForAccurateLocation(true) // Attendre un point précis avant de notifier
                     .build();
 
             locationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper());
         } catch (SecurityException e) {
-            Log.e(TAG, "Erreur permission GPS", e);
+            Log.e(TAG, "Erreur permission GPS: " + e.getMessage());
         }
     }
 
     public void stopGPSUpdates() {
-        Log.d(TAG, "🔋 Réduction précision GPS (Basse consommation)");
+        Log.d(TAG, "🔋 Stop GPS");
         try {
+            // stop update
             locationClient.removeLocationUpdates(locationCallback);
             
-            // On peut optionnellement relancer un mode très basse consommation ici
-            // ou simplement laisser le tracker d'activité réveiller le GPS plus tard.
+            // stop service
+            Intent intent = new Intent(context, TrackingService.class);
+            context.stopService(intent);
         } catch (Exception e) {
             Log.e(TAG, "Erreur arrêt GPS", e);
         }
@@ -90,23 +95,39 @@ public class ActivityRecognition {
 
     private void setupActivityTransitions() {
         List<ActivityTransition> transitions = new ArrayList<>();
-        int[] activities = {DetectedActivity.WALKING, DetectedActivity.STILL, DetectedActivity.IN_VEHICLE, DetectedActivity.RUNNING};
+        // On écoute uniquement ce qui est nécessaire pour optimiser la batterie
+        int[] activities = {
+            DetectedActivity.IN_VEHICLE, 
+            DetectedActivity.WALKING, 
+            DetectedActivity.STILL
+        };
 
         for (int activity : activities) {
-            transitions.add(new ActivityTransition.Builder().setActivityType(activity)
-                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER).build());
-            transitions.add(new ActivityTransition.Builder().setActivityType(activity)
-                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_EXIT).build());
+            transitions.add(new ActivityTransition.Builder()
+                .setActivityType(activity)
+                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
+                .build());
+            transitions.add(new ActivityTransition.Builder()
+                .setActivityType(activity)
+                .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_EXIT)
+                .build());
         }
 
         Intent intent = new Intent(context, ActivityTransitionReceiver.class);
+        // Important: Utiliser une action explicite pour le BroadcastReceiver
         intent.setAction("fr.lelab.activity.ACTION_PROCESS_ACTIVITY_TRANSITIONS");
+        
         activityPendingIntent = createPendingIntent(intent);
 
         try {
-            activityClient.requestActivityTransitionUpdates(new ActivityTransitionRequest(transitions), activityPendingIntent)
-                .addOnSuccessListener(aVoid -> Log.i(TAG, "Sensors activated"));
-        } catch (SecurityException e) { Log.e(TAG, "Missing permission", e); }
+            activityClient.requestActivityTransitionUpdates(
+                new ActivityTransitionRequest(transitions), 
+                activityPendingIntent
+            ).addOnSuccessListener(aVoid -> Log.i(TAG, "Capteurs d'activité activés"))
+             .addOnFailureListener(e -> Log.e(TAG, "Erreur activation capteurs: " + e.getMessage()));
+        } catch (SecurityException e) { 
+            Log.e(TAG, "Permission d'activité manquante", e); 
+        }
     }
 
     public void stopTracking() {
@@ -118,8 +139,12 @@ public class ActivityRecognition {
     }
 
     private PendingIntent createPendingIntent(Intent intent) {
+        // Compatibilité Android 7 à 16
+        // FLAG_MUTABLE est requis car Google Play Services remplit cet intent avec les données de l'activité
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) flags |= PendingIntent.FLAG_MUTABLE;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            flags |= PendingIntent.FLAG_MUTABLE;
+        }
         return PendingIntent.getBroadcast(context, 0, intent, flags);
     }
 }

@@ -4,7 +4,7 @@ export interface PermissionStatus {
     location: PermissionState;
 }
 export interface ActivityEvent {
-    type: 'walking' | 'running' | 'cycling' | 'automotive' | 'stationary' | 'unknown';
+    activity: 'walking' | 'running' | 'cycling' | 'automotive' | 'stationary' | 'unknown';
     transition: 'ENTER' | 'EXIT';
 }
 export interface GpsLocation {

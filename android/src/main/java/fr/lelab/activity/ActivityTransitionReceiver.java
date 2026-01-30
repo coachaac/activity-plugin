@@ -1,64 +1,177 @@
 package fr.lelab.activity;
 
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.app.NotificationManager;
+import android.app.ActivityManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
+import android.os.Build;
+import android.util.Log;
+
+import com.getcapacitor.JSObject;
 import com.google.android.gms.location.ActivityTransition;
 import com.google.android.gms.location.ActivityTransitionEvent;
 import com.google.android.gms.location.ActivityTransitionResult;
 import com.google.android.gms.location.DetectedActivity;
 
 public class ActivityTransitionReceiver extends BroadcastReceiver {
+    private static final String TAG = "ActivityReceiver";
+    public static final String ACTION_STOP_GPS_GRACE = "fr.lelab.activity.ACTION_STOP_GPS_GRACE";
+    private static final long STOP_DELAY = 180000; // 3 minutes
+
     @Override
     public void onReceive(Context context, Intent intent) {
-        if (intent != null && ActivityTransitionResult.hasResult(intent)) {
+        if (intent == null) return;
+        String action = intent.getAction();
+        Log.d("SmartPilot", "📩 RECU : Action = " + action);
+
+        // --- 1. GESTION DE L'ALARME (ARRÊT GRACE PERIOD) ---
+        if (ACTION_STOP_GPS_GRACE.equals(action)) {
+            Log.d(TAG, "⏱ AlarmManager : Fin du délai de grâce, arrêt définitif du service.");
+            stopTrackingService(context);
+            return;
+        }
+
+        // --- 2. GESTION DE LA SIMULATION ADB ---
+        if (intent.hasExtra("com.google.android.gms.location.EXTRA_ACTIVITY_RESULT")) {
+            int activityType = intent.getIntExtra("com.google.android.gms.location.EXTRA_ACTIVITY_RESULT", -1);
+            int transitionType = intent.getIntExtra("com.google.android.gms.location.EXTRA_TRANSITION_TYPE", 0);
+            Log.d("SmartPilot", "🧪 Simulation ADB détectée !");
+            handleTransition(context, activityType, transitionType);
+            return;
+        }
+
+        // --- 3. GESTION DU MODE RÉEL ---
+        if (ActivityTransitionResult.hasResult(intent)) {
             ActivityTransitionResult result = ActivityTransitionResult.extractResult(intent);
-            SharedPreferences prefs = context.getSharedPreferences("SmartPilotPrefs", Context.MODE_PRIVATE);
-
             for (ActivityTransitionEvent event : result.getTransitionEvents()) {
-                String activityName = getActivityName(event.getActivityType());
-                String transitionName = (event.getTransitionType() == ActivityTransition.ACTIVITY_TRANSITION_ENTER) ? "ENTER" : "EXIT";
-
-                JsonStorageHelper.saveActivity(context, activityName, transitionName);
-
-                if (event.getActivityType() == DetectedActivity.IN_VEHICLE) {
-                    if (event.getTransitionType() == ActivityTransition.ACTIVITY_TRANSITION_ENTER) {
-                        prefs.edit().putBoolean("is_driving", true).apply();
-                        ActivityRecognitionHelper.setupActivityTransitions(context);
-                    } else {
-                        prefs.edit().putBoolean("is_driving", false).apply();
-                        ActivityRecognitionHelper.stopActivityTransitions(context);
-                    }
-                } else if (event.getTransitionType() == ActivityTransition.ACTIVITY_TRANSITION_ENTER) {
-                    if (event.getActivityType() == DetectedActivity.WALKING || event.getActivityType() == DetectedActivity.STILL) {
-                        ActivityRecognitionHelper.stopActivityTransitions(context);
-                    }
-                }
+                handleTransition(context, event.getActivityType(), event.getTransitionType());
             }
         }
     }
 
+    private void handleTransition(Context context, int activityType, int transitionType) {
+        String activityName = getActivityName(activityType);
+        String transitionName = (transitionType == ActivityTransition.ACTIVITY_TRANSITION_ENTER) ? "ENTER" : "EXIT";
+        Log.d(TAG, "⚡ Traitement : " + activityName + " [" + transitionName + "]");
 
-    // Méthode de conversion des codes d'activité en texte lisible
+        JsonStorageHelper.saveActivity(context, activityName, transitionName);
+
+        JSObject data = new JSObject();
+        data.put("activity", activityName.toLowerCase().replace("in_vehicle", "automotive"));
+        data.put("transition", transitionName);
+        data.put("timestamp", System.currentTimeMillis() / 1000);
+        ActivityRecognitionPlugin.onActivityEvent(data);
+
+        // CAS 1 : On entre dans le véhicule -> Start GPS
+        if ("IN_VEHICLE".equals(activityName) && transitionType == ActivityTransition.ACTIVITY_TRANSITION_ENTER) {
+            Log.d(TAG, "🚗 Détection : Entrée en voiture. Start GPS.");
+            cancelGraceAlarm(context);
+            startTrackingService(context);
+        } 
+
+        // CAS 2 : On SORT du véhicule (EXIT) 
+        // OU on entre dans une autre activité alors que le service tourne
+        else if (
+            ("IN_VEHICLE".equals(activityName) && transitionType == ActivityTransition.ACTIVITY_TRANSITION_EXIT) || 
+            (transitionType == ActivityTransition.ACTIVITY_TRANSITION_ENTER && !"IN_VEHICLE".equals(activityName))
+        ) {
+            if (isServiceRunning(context)) {
+                Log.d(TAG, "⏳ Détection : Fin de conduite (" + activityName + " " + transitionName + "). Timer lancé.");
+                scheduleGraceAlarm(context);
+            }
+        }
+    }
+
+    private void scheduleGraceAlarm(Context context) {
+        Intent intent = new Intent(context, ActivityTransitionReceiver.class);
+        intent.setAction(ACTION_STOP_GPS_GRACE);
+        
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            flags |= PendingIntent.FLAG_IMMUTABLE;
+        }
+
+        PendingIntent pi = PendingIntent.getBroadcast(context, 0, intent, flags);
+        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        long triggerAt = System.currentTimeMillis() + STOP_DELAY;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Vérifie si on a le droit de programmer une alarme exacte
+            if (am.canScheduleExactAlarms()) {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+            } else {
+                // Repli sur une alarme normale si la permission est refusée
+                am.setWindow(AlarmManager.RTC_WAKEUP, triggerAt, 10000, pi);
+            }
+        } else {
+            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+        }
+        Log.d(TAG, "⏰ Alarme programmée dans 3 min (Exact)");
+    }
+
+    private void cancelGraceAlarm(Context context) {
+        Intent intent = new Intent(context, ActivityTransitionReceiver.class);
+        intent.setAction(ACTION_STOP_GPS_GRACE);
+        PendingIntent pi = PendingIntent.getBroadcast(context, 0, intent, 
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        
+        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        am.cancel(pi);
+    }
+
+
+    private void startTrackingService(Context context) {
+        Intent serviceIntent = new Intent(context, TrackingService.class);
+        // On ajoute l'action explicite !
+        serviceIntent.setAction("fr.lelab.activity.START_TRACKING"); 
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(serviceIntent);
+        } else {
+            context.startService(serviceIntent);
+        }
+    }
+
+
+    private void stopTrackingService(Context context) {
+        Log.d(TAG, "🛑 Tentative d'arrêt du service GPS...");
+        Intent serviceIntent = new Intent(context, TrackingService.class);
+        
+        // 1. On demande l'arrêt au système
+        boolean stopped = context.stopService(serviceIntent);
+        
+        // 2. Sécurité supplémentaire : On annule la notification directement depuis ici
+        // au cas où le service mettrait trop de temps à mourir
+        if (stopped) {
+            NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+            nm.cancel(1); // Utilise l'ID de notification (1) défini dans ton service
+            Log.d(TAG, "✅ Service stoppé et notification annulée.");
+        }
+    }
+
+
+
+    private boolean isServiceRunning(Context context) {
+        ActivityManager manager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        for (ActivityManager.RunningServiceInfo service : manager.getRunningServices(Integer.MAX_VALUE)) {
+            if (TrackingService.class.getName().equals(service.service.getClassName())) return true;
+        }
+        return false;
+    }
+
+
     private String getActivityName(int activityType) {
         switch (activityType) {
-            case com.google.android.gms.location.DetectedActivity.IN_VEHICLE:
-                return "IN_VEHICLE";
-            case com.google.android.gms.location.DetectedActivity.ON_BICYCLE:
-                return "ON_BICYCLE";
-            case com.google.android.gms.location.DetectedActivity.ON_FOOT:
-                return "ON_FOOT";
-            case com.google.android.gms.location.DetectedActivity.RUNNING:
-                return "RUNNING";
-            case com.google.android.gms.location.DetectedActivity.STILL:
-                return "STILL";
-            case com.google.android.gms.location.DetectedActivity.TILTING:
-                return "TILTING";
-            case com.google.android.gms.location.DetectedActivity.WALKING:
-                return "WALKING";
-            default:
-                return "UNKNOWN_" + activityType;
+            case DetectedActivity.IN_VEHICLE: return "IN_VEHICLE";
+            case DetectedActivity.ON_BICYCLE: return "ON_BICYCLE";
+            case DetectedActivity.ON_FOOT: return "ON_FOOT";
+            case DetectedActivity.RUNNING: return "RUNNING";
+            case DetectedActivity.STILL: return "STILL";
+            case DetectedActivity.WALKING: return "WALKING";
+            default: return "UNKNOWN_" + activityType;
         }
     }
 }

@@ -19,26 +19,29 @@
 
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
     <application>
 
         <service 
-            android:name=".TrackingService"
+            android:name="fr.lelab.activity.TrackingService"
             android:foregroundServiceType="location"
             android:enabled="true"
             android:exported="false"
-            android:stopWithTask="true" />
+            android:stopWithTask="false" />
 
-        <receiver
-            android:name=".ActivityTransitionReceiver"
+        <receiver 
+            android:name=".ActivityTransitionReceiver" 
             android:enabled="true"
-            android:exported="false">
+            android:exported="true">
             <intent-filter>
+                <action android:name="fr.lelab.activity.ACTION_STOP_GPS_GRACE" />
                 <action android:name="fr.lelab.activity.ACTION_PROCESS_ACTIVITY_TRANSITIONS" />
             </intent-filter>
         </receiver>
 
         <receiver
-            android:name=".BootReceiver"
+            android:name="fr.lelab.activity.BootReceiver"
             android:enabled="true"
             android:exported="true">
             <intent-filter>
@@ -48,7 +51,7 @@
         </receiver>
 
         <receiver 
-            android:name=".LocationReceiver" 
+            android:name="fr.lelab.activity.LocationReceiver" 
             android:enabled="true" 
             android:exported="false" />
 

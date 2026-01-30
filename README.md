@@ -19,8 +19,8 @@ A high-performance Capacitor plugin for Android and iOS that detects transportat
 
 ## 📦 Installation
 
-*npm install activity-plugin*
-*npx cap sync*
+    npm install activity-plugin
+    npx cap sync
 
 **Android Configuration**
 In your AndroidManifest.xml, add the following permissions:
@@ -109,6 +109,28 @@ The stored stored_locations.json follows this structure:
       }
     ]
 
+activityChange send to app
+
+    JSON
+    [
+      {
+        "activity": 'walking' | 'running' | 'cycling' | 'automotive' | 'stationary' | 'unknown',
+        "transition": 'ENTER' | 'EXIT',
+      }
+    ]
+
+
+onLocationUpdate send to app
+
+    JSON
+    [
+      {
+        
+      }
+    ]
+
+
+
 
 ## **🔍 Troubleshooting**
 
@@ -136,16 +158,16 @@ Vibrations are only triggered in debug mode to ensure the vibration motor doesn'
 
 ## 🔧 API Reference
 
+    //Initializes the Activity Recognition engine.
+    // debug: If true, the device will vibrate twice on driving start and once on driving stop.
     startTracking(options?: { debug?: boolean })
-    Initializes the Activity Recognition engine.
     
-    debug: If true, the device will vibrate twice on driving start and once on driving stop.
-    
+    // Returns a Promise with the array of all points stored in the internal JSON file.
     getSavedLocations()
-    Returns a Promise with the array of all points stored in the internal JSON file.
     
-    shareSavedLocations()
-    Opens the system share sheet. 
+    /* Opens the system share sheet. 
     On iOS, it uses UIActivityViewController. 
-    On Android, it uses FileProvider to securely share the stored_locations.json.
+    On Android, it uses FileProvider to securely share the stored_locations.json.*/
+    shareSavedLocations()
+    
 
