@@ -1,126 +1,149 @@
 package fr.lelab.activity;
 
 import android.content.Context;
-import android.location.Location;
-import com.getcapacitor.JSObject;
+import android.util.Log;
 import com.getcapacitor.JSArray;
-import org.json.JSONArray;
-import org.json.JSONObject;
+import com.getcapacitor.JSObject;
+import org.json.JSONException;
+import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.nio.charset.StandardCharsets;
-import java.text.SimpleDateFormat; 
-import java.util.Date;          
+import java.io.FileReader;
+import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Locale;
 
 public class JsonStorageHelper {
+
     private static final String FILE_NAME = "stored_locations.json";
+    private static final String TAG = "JsonStorageHelper";
 
-    // Save GPS position
-    public static synchronized void saveLocation(Context context, double lat, double lng, float speed) {
-        try {
-            JSONArray dataArray = loadData(context);
-            JSONObject entry = new JSONObject();
-            entry.put("type", "location");
-            entry.put("lat", lat);
-            entry.put("lng", lng);
-            entry.put("speed", speed);
-            entry.put("timestamp", System.currentTimeMillis() / 1000.0);
-
-            dataArray.put(entry);
-            saveToFile(context, dataArray);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    public static synchronized void saveActivity(Context context, String activity, String transition) {
-        try {
-            JSONArray dataArray = loadData(context);
-            JSONObject entry = new JSONObject();
-
-            // Format to readable date
-            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
-            String currentDate = sdf.format(new Date());
-
-            entry.put("type", "activity");
-            entry.put("activity", activity);     // ex: "automotive"
-            entry.put("transition", transition); // ex: "ENTER"
-            entry.put("date", currentDate); // more readable than timestamp
-            entry.put("timestamp", System.currentTimeMillis() / 1000.0);
-
-            dataArray.put(entry);
-            saveToFile(context, dataArray);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    // --- Internal uitlity ---
-
-    private static void saveToFile(Context context, JSONArray array) {
-        try {
-            File file = new File(context.getFilesDir(), FILE_NAME);
-            try (FileOutputStream fos = new FileOutputStream(file)) {
-                fos.write(array.toString().getBytes(StandardCharsets.UTF_8));
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    private static JSONArray loadData(Context context) {
+    /**
+     * Sauvegarde une position en mode APPEND
+     */
+    public static void saveLocation(Context context, double lat, double lng, float speed) {
         File file = new File(context.getFilesDir(), FILE_NAME);
-        if (!file.exists()) return new JSONArray();
+        
+        JSObject location = new JSObject();
+        location.put("lat", lat);
+        location.put("lng", lng);
+        location.put("speed", speed);
+        location.put("date", getFormattedDate());
+        // MODIF : On garde les millisecondes (suppression du / 1000)
+        location.put("timestamp", System.currentTimeMillis());
 
-        try (FileInputStream fis = new FileInputStream(file)) {
-            byte[] data = new byte[(int) file.length()];
-            fis.read(data);
-            return new JSONArray(new String(data, StandardCharsets.UTF_8));
-        } catch (Exception e) {
-            return new JSONArray();
+        String entry = location.toString() + "\n";
+
+        try (FileOutputStream fos = new FileOutputStream(file, true)) {
+            fos.write(entry.getBytes());
+        } catch (IOException e) {
+            Log.e(TAG, "❌ Erreur lors de l'écriture Append position", e);
         }
     }
 
-    // --- PLUGIN Method---
+    /**
+     * AJOUT : Sauvegarde un changement d'activité pour ActivityTransitionReceiver
+     */
+    public static void saveActivity(Context context, String activityName, String transitionName) {
+        File file = new File(context.getFilesDir(), FILE_NAME);
+        
+        JSObject activity = new JSObject();
+        activity.put("type", "activity");
+        activity.put("activity", activityName);
+        activity.put("transition", transitionName);
+        activity.put("date", getFormattedDate());
+        activity.put("timestamp", System.currentTimeMillis());
+        
+        String entry = activity.toString() + "\n";
+
+        try (FileOutputStream fos = new FileOutputStream(file, true)) {
+            fos.write(entry.getBytes());
+            Log.d(TAG, "🏃 Activité enregistrée : " + activityName);
+        } catch (IOException e) {
+            Log.e(TAG, "❌ Erreur lors de l'écriture Append activité", e);
+        }
+    }
 
     public static JSArray loadLocationsAsJSArray(Context context) {
-        try {
-            return JSArray.from(loadData(context));
-        } catch (Exception e) {
-            return new JSArray();
+        File file = new File(context.getFilesDir(), FILE_NAME);
+        JSArray locations = new JSArray();
+
+        if (!file.exists()) return locations;
+
+        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (!line.trim().isEmpty()) {
+                    try {
+                        locations.put(new JSObject(line));
+                    } catch (JSONException e) {
+                        Log.e(TAG, "Ligne JSON malformée ignorée", e);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "Erreur lors de la lecture du fichier", e);
         }
+
+        return locations;
     }
 
     public static void clearLocations(Context context) {
         File file = new File(context.getFilesDir(), FILE_NAME);
-        if (file.exists()) file.delete();
+        if (file.exists()) {
+            boolean deleted = file.delete();
+            Log.d(TAG, "🗑️ Fichier supprimé : " + deleted);
+        }
     }
 
+    private static String getFormattedDate() {
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
+        return sdf.format(new Date());
+    }
 
-    /**
-     * Convert Android Location to JSObject to send to App
-     */
-    public static JSObject locationToJSObject(Location location) {
+    public static JSObject locationToJSObject(android.location.Location location) {
         JSObject obj = new JSObject();
         obj.put("lat", location.getLatitude());
         obj.put("lng", location.getLongitude());
-        obj.put("speed", location.getSpeed()); // speed m/s
-        obj.put("timestamp", location.getTime() / 1000.0);
-        
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
-        obj.put("date", sdf.format(new Date(location.getTime())));
-        
+        obj.put("speed", location.getSpeed());
+        // MODIF : On garde les millisecondes (suppression du / 1000)
+        obj.put("timestamp", location.getTime());
         return obj;
     }
 
-    /**
-     * Save  Location Object in the JSON
-     */
-    public static synchronized void saveLocationObject(Context context, Location location) {
-        saveLocation(context, location.getLatitude(), location.getLongitude(), location.getSpeed());
+    public static void purgeLocationsBefore(Context context, long timestampLimit) {
+        File file = new File(context.getFilesDir(), FILE_NAME);
+        if (!file.exists()) return;
+
+        File tempFile = new File(context.getFilesDir(), "temp_purge.json");
+
+        try (BufferedReader br = new BufferedReader(new FileReader(file));
+             FileOutputStream fos = new FileOutputStream(tempFile)) {
+            
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.trim().isEmpty()) continue;
+                
+                try {
+                    JSObject obj = new JSObject(line);
+                    long pointTimestamp = obj.getLong("timestamp");
+
+                    if (pointTimestamp >= timestampLimit) {
+                        fos.write((line + "\n").getBytes());
+                    }
+                } catch (Exception e) {
+                    // Ligne corrompue ignorée
+                }
+            }
+        } catch (IOException e) {
+            Log.e("SmartPilot", "❌ Erreur lors de la purge par timestamp", e);
+        }
+
+        if (tempFile.exists()) {
+            if (file.delete()) {
+                tempFile.renameTo(file);
+            }
+        }
     }
-
-
 }

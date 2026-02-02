@@ -9,4 +9,5 @@ CAP_PLUGIN(ActivityRecognitionPlugin, "ActivityRecognition",
         CAP_PLUGIN_METHOD(getSavedLocations, CAPPluginReturnPromise);
         CAP_PLUGIN_METHOD(clearSavedLocations, CAPPluginReturnPromise);
         CAP_PLUGIN_METHOD(shareSavedLocations, CAPPluginReturnPromise);
+        CAP_PLUGIN_METHOD(purgeLocationsBefore, CAPPluginReturnPromise);
 )

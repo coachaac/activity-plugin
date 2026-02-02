@@ -36,4 +36,9 @@ export class ActivityRecognitionWeb extends WebPlugin implements ActivityRecogni
   async shareSavedLocations(): Promise<void> {
     console.warn('File sharing not implemented on Web');
   }
+
+  async purgeLocationsBefore(options: { timestamp: number }): Promise<void> {
+    console.log('🌐 Web implementation: purgeLocationsBefore called with timestamp:', options.timestamp);
+  }
+  
 }

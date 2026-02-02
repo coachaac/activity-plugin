@@ -33,6 +33,13 @@ export interface ActivityRecognitionPlugin {
      * share JSON File
      */
     shareSavedLocations(): Promise<void>;
+    /**
+     * Suppress point older than timestamp
+     * @param options { timestamp: number } - Timestamp in millisecondes
+     */
+    purgeLocationsBefore(options: {
+        timestamp: number;
+    }): Promise<void>;
     addListener(eventName: 'activityChange', listenerFunc: (event: ActivityEvent) => void): Promise<PluginListenerHandle>;
     /**
      * live GPS position (if app foreground)

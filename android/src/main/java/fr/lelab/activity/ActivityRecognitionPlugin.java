@@ -5,6 +5,7 @@ import android.net.Uri;
 import android.content.Intent;
 import androidx.core.content.FileProvider;
 import android.Manifest;
+import android.content.SharedPreferences;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Build;
@@ -54,15 +55,31 @@ public class ActivityRecognitionPlugin extends Plugin {
         instance = this;
         implementation = new ActivityRecognition(getContext());
 
-        // 1. Sécurité : On arrête la reconnaissance d'activité
-        ActivityRecognitionHelper.stopActivityTransitions(getContext());
+        // On récupère l'état sauvegardé
+        SharedPreferences prefs = getContext().getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
+        boolean wasTracking = prefs.getBoolean("tracking_active", false);
+        boolean wasDriving = prefs.getBoolean("driving_state", false);
 
-        // 2. CRUCIAL : On arrête le service de tracking au démarrage
-        // Cela supprime la notification "fantôme" héritée du dernier lancement
-        Intent intent = new Intent(getContext(), TrackingService.class);
-        getContext().stopService(intent);
-        
-        Log.d("SmartPilot", "🧹 Nettoyage : Service de tracking arrêté au lancement");
+        if (wasTracking) {
+            Log.d("SmartPilot", "🔄 Relance automatique de la détection d'activité");
+            implementation.startTracking();
+            
+            if (wasDriving) {
+                Log.d("SmartPilot", "🚗 Reprise du tracking GPS (Foreground Service)");
+                // On relance le service (Android gérera si déjà lancé)
+                Intent intent = new Intent(getContext(), TrackingService.class);
+                intent.setAction(TrackingService.ACTION_START_TRACKING);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    getContext().startForegroundService(intent);
+                } else {
+                    getContext().startService(intent);
+                }
+            }
+        } else {
+            // Nettoyage uniquement si rien n'est actif
+            Intent intent = new Intent(getContext(), TrackingService.class);
+            getContext().stopService(intent);
+        }
     }
 
 
@@ -88,20 +105,8 @@ public class ActivityRecognitionPlugin extends Plugin {
     // Detect Event location
     public static void onLocationEvent(JSObject data) {
         if (instance != null) {
-            // On ne sauvegarde et on ne notifie le JS que si le mode conduite est actif
-            // Note: Le service GPS peut tourner pendant la Grace Period (gérée par le Receiver)
-            try {
-                JsonStorageHelper.saveLocation(
-                    instance.getContext(),
-                    data.getDouble("lat"),
-                    data.getDouble("lng"),
-                    data.getInteger("speed", 0).floatValue()
-                );
-
-                instance.notifyListeners("onLocationUpdate", data);
-            } catch (Exception e) {
-                Log.e("SmartPilot", "Erreur sauvegarde location", e);
-            }
+            // On ne fait QUE notifier le JS pour l'affichage
+            instance.notifyListeners("onLocationUpdate", data);
         }
     }
 
@@ -259,4 +264,25 @@ public class ActivityRecognitionPlugin extends Plugin {
             }
         }
     }
+
+
+    @PluginMethod
+    public void purgeLocationsBefore(PluginCall call) {
+        // On récupère le timestamp envoyé par le JS
+        Long timestampLimit = call.getLong("timestamp");
+
+        if (timestampLimit == null) {
+            call.reject("Le paramètre 'timestamp' est obligatoire.");
+            return;
+        }
+
+        try {
+            JsonStorageHelper.purgeLocationsBefore(getContext(), timestampLimit.longValue());
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Erreur lors de la purge : " + e.getLocalizedMessage());
+        }
+    }
+
+
 }

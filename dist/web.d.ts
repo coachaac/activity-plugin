@@ -12,4 +12,7 @@ export declare class ActivityRecognitionWeb extends WebPlugin implements Activit
     }>;
     clearSavedLocations(): Promise<void>;
     shareSavedLocations(): Promise<void>;
+    purgeLocationsBefore(options: {
+        timestamp: number;
+    }): Promise<void>;
 }

@@ -55,31 +55,41 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
     private void handleTransition(Context context, int activityType, int transitionType) {
         String activityName = getActivityName(activityType);
         String transitionName = (transitionType == ActivityTransition.ACTIVITY_TRANSITION_ENTER) ? "ENTER" : "EXIT";
-        Log.d(TAG, "⚡ Traitement : " + activityName + " [" + transitionName + "]");
+        
+        // On normalise le nom pour le stockage et le JS
+        String normalizedActivity = activityName.toLowerCase().replace("in_vehicle", "automotive");
+        
+        Log.d(TAG, "⚡ Traitement : " + normalizedActivity + " [" + transitionName + "]");
 
-        JsonStorageHelper.saveActivity(context, activityName, transitionName);
+        // 1. Sauvegarde dans le fichier local (JSONL) via le Helper
+        // On utilise le nom normalisé pour la cohérence
+        JsonStorageHelper.saveActivity(context, normalizedActivity, transitionName);
 
+        // 2. Notification en temps réel au JavaScript (Capacitor Listeners)
         JSObject data = new JSObject();
-        data.put("activity", activityName.toLowerCase().replace("in_vehicle", "automotive"));
+        data.put("activity", normalizedActivity);
         data.put("transition", transitionName);
-        data.put("timestamp", System.currentTimeMillis() / 1000);
+        // MODIF : On reste en millisecondes (suppression du / 1000)
+        data.put("timestamp", System.currentTimeMillis()); 
+        
         ActivityRecognitionPlugin.onActivityEvent(data);
 
+        // --- LOGIQUE DE GESTION DU SERVICE GPS ---
+
         // CAS 1 : On entre dans le véhicule -> Start GPS
-        if ("IN_VEHICLE".equals(activityName) && transitionType == ActivityTransition.ACTIVITY_TRANSITION_ENTER) {
+        if (DetectedActivity.IN_VEHICLE == activityType && transitionType == ActivityTransition.ACTIVITY_TRANSITION_ENTER) {
             Log.d(TAG, "🚗 Détection : Entrée en voiture. Start GPS.");
             cancelGraceAlarm(context);
             startTrackingService(context);
         } 
 
-        // CAS 2 : On SORT du véhicule (EXIT) 
-        // OU on entre dans une autre activité alors que le service tourne
+        // CAS 2 : On SORT du véhicule OU on commence une autre activité
         else if (
-            ("IN_VEHICLE".equals(activityName) && transitionType == ActivityTransition.ACTIVITY_TRANSITION_EXIT) || 
-            (transitionType == ActivityTransition.ACTIVITY_TRANSITION_ENTER && !"IN_VEHICLE".equals(activityName))
+            (DetectedActivity.IN_VEHICLE == activityType && transitionType == ActivityTransition.ACTIVITY_TRANSITION_EXIT) || 
+            (transitionType == ActivityTransition.ACTIVITY_TRANSITION_ENTER && DetectedActivity.IN_VEHICLE != activityType)
         ) {
             if (isServiceRunning(context)) {
-                Log.d(TAG, "⏳ Détection : Fin de conduite (" + activityName + " " + transitionName + "). Timer lancé.");
+                Log.d(TAG, "⏳ Détection : Fin de conduite probable (" + normalizedActivity + "). Timer 3min lancé.");
                 scheduleGraceAlarm(context);
             }
         }

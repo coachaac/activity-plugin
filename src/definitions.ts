@@ -42,6 +42,12 @@ export interface ActivityRecognitionPlugin {
    */
   shareSavedLocations(): Promise<void>;
 
+  /**
+   * Suppress point older than timestamp
+   * @param options { timestamp: number } - Timestamp in millisecondes
+   */
+  purgeLocationsBefore(options: { timestamp: number }): Promise<void>;
+
 
   // --- EVENT LISTENER ---
 

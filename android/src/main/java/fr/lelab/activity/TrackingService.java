@@ -3,6 +3,7 @@ package fr.lelab.activity;
 import android.app.*;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log; 
@@ -26,16 +27,20 @@ public class TrackingService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // --- LA SÉCURITÉ EST ICI ---
-        // Si le service démarre sans l'action explicite (ex: redémarrage automatique d'Android)
-        // On ne lance pas la notification et on arrête le service.
-        if (intent == null || !ACTION_START_TRACKING.equals(intent.getAction())) {
-            Log.d("TrackingService", "⚠️ Démarrage fantôme détecté (START_STICKY), arrêt immédiat.");
+        // On récupère l'état pour savoir si on doit vraiment tourner
+        SharedPreferences prefs = getSharedPreferences("CapacitorStorage", MODE_PRIVATE);
+        boolean wasTracking = prefs.getBoolean("tracking_active", false);
+        boolean wasDriving = prefs.getBoolean("driving_state", false);
+
+        // On autorise le démarrage si l'action est la bonne OU si le système nous relance (intent null)
+        // mais seulement si l'utilisateur n'avait pas fait "STOP" manuellement.
+        if (intent == null && !wasDriving) {
+            Log.d("TrackingService", "⚠️ Relance système mais pas en mode conduite, arrêt.");
             stopSelf();
-            return START_NOT_STICKY; // On dit à Android de ne plus essayer de le relancer seul
+            return START_NOT_STICKY;
         }
 
-        createNotificationChannel();
+        Log.d("TrackingService", "⚡ Service démarré ou restauré.");
         
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Coach AAC")
@@ -44,6 +49,9 @@ public class TrackingService extends Service {
                 .setOngoing(true)
                 .setCategory(Notification.CATEGORY_SERVICE)
                 .build();
+
+        createNotificationChannel();
+
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
@@ -93,6 +101,9 @@ public class TrackingService extends Service {
         }
         
         stopForeground(true);
+        NotificationManager notificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        notificationManager.cancel(NOTIFICATION_ID);
+
         super.onDestroy();
     }
 
