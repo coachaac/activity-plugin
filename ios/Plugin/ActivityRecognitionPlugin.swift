@@ -86,9 +86,9 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     private func handleActivityUpdate(_ activity: CMMotionActivity) {
 
         // do not take into account low confidence activity detection
-        if activity.confidence == .low {
+        /*if activity.confidence == .low {
             return
-        }
+        }*/
 
         let currentType = getActivityName(activity)
 
@@ -109,6 +109,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
                 self.isDriving = true
                 UserDefaults.standard.set(true, forKey: kIsDrivingState)
                 self.startHighPrecisionGPS()
+                if let lastKnownLocation = self.locationManager.location {
+                    // On passe le point actuel dans un tableau pour le traitement
+                    self.processRembobinage(locations: [lastKnownLocation], startDate: activity.startDate)
+                }
                 if debugMode { self.triggerVibration(double: true) }
             }
         } else if activity.walking || activity.stationary || activity.cycling {
@@ -120,6 +124,36 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
     }
 
+    
+    private func processRembobinage(locations: [CLLocation], startDate: Date) {
+        print("⏪ Tentative de récupération de points depuis : \(startDate)")
+        
+        for location in locations {
+            // On ne garde le point que s'il a été capturé APRÈS le début réel 
+            // de l'activité physique (startDate) et s'il est assez précis.
+            if location.timestamp >= startDate && location.horizontalAccuracy <= 100 {
+                
+                let backfillPoint: [String: Any] = [
+                    "lat": location.coordinate.latitude,
+                    "lng": location.coordinate.longitude,
+                    "speed": location.speed,
+                    "date": getFormattedDateFrom(location.timestamp), // Utilise la date du point, pas "maintenant"
+                    "timestamp": location.timestamp.timeIntervalSince1970 * 1000,
+                    "isBackfill": true // Flag utile pour ton JS
+                ]
+                
+                print("📍 Point de rembobinage enregistré (\(location.timestamp))")
+                saveLocationToJSON(point: backfillPoint)
+            }
+        }
+    }
+
+    // MARK: - Helpers Date améliorés
+    private func getFormattedDateFrom(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.string(from: date)
+    }
 
 
     private func getActivityName(_ activity: CMMotionActivity) -> String {

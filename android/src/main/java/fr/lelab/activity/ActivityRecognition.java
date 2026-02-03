@@ -104,14 +104,16 @@ public class ActivityRecognition {
         stopGPSUpdates();
         if (activityClient != null && activityPendingIntent != null) {
             activityClient.removeActivityTransitionUpdates(activityPendingIntent);
+            activityClient.removeActivityUpdates(activityPendingIntent);
         }
     }
 
     private PendingIntent createPendingIntent(Intent intent) {
+        int requestCode = 4242;
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             flags |= PendingIntent.FLAG_MUTABLE;
         }
-        return PendingIntent.getBroadcast(context, 0, intent, flags);
+        return PendingIntent.getBroadcast(context, requestCode, intent, flags);
     }
 }

@@ -172,15 +172,14 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
         return false;
     }
 
-
     private String getActivityName(int activityType) {
         switch (activityType) {
-            case DetectedActivity.IN_VEHICLE: return "IN_VEHICLE";
-            case DetectedActivity.ON_BICYCLE: return "ON_BICYCLE";
-            case DetectedActivity.ON_FOOT: return "ON_FOOT";
-            case DetectedActivity.RUNNING: return "RUNNING";
-            case DetectedActivity.STILL: return "STILL";
-            case DetectedActivity.WALKING: return "WALKING";
+            case DetectedActivity.IN_VEHICLE: return "automotive";
+            case DetectedActivity.ON_BICYCLE: return "cycling";
+            case DetectedActivity.ON_FOOT: return "walking";
+            case DetectedActivity.RUNNING: return "running";
+            case DetectedActivity.STILL: return "stationary";
+            case DetectedActivity.WALKING: return "walking";
             default: return "UNKNOWN_" + activityType;
         }
     }
