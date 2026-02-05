@@ -13,13 +13,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-
     <uses-permission android:name="android.permission.VIBRATE" />
-
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
     <application>
 
@@ -33,7 +29,8 @@
         <receiver 
             android:name=".ActivityTransitionReceiver" 
             android:enabled="true"
-            android:exported="true">
+            android:exported="true"
+            android:directBootAware="true">
             <intent-filter>
                 <action android:name="fr.lelab.activity.ACTION_STOP_GPS_GRACE" />
                 <action android:name="fr.lelab.activity.ACTION_PROCESS_ACTIVITY_TRANSITIONS" />
@@ -43,9 +40,11 @@
         <receiver
             android:name="fr.lelab.activity.BootReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="true"
+            android:directBootAware="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
@@ -53,7 +52,8 @@
         <receiver 
             android:name="fr.lelab.activity.LocationReceiver" 
             android:enabled="true" 
-            android:exported="false" />
+            android:exported="true" 
+            android:directBootAware="true"/>
 
         <provider
             android:name="androidx.core.content.FileProvider"

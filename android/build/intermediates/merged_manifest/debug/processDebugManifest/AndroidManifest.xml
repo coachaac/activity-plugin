@@ -15,7 +15,6 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
     <application>
         <service
@@ -27,6 +26,7 @@
 
         <receiver
             android:name="fr.lelab.activity.ActivityTransitionReceiver"
+            android:directBootAware="true"
             android:enabled="true"
             android:exported="true" >
             <intent-filter>
@@ -36,17 +36,20 @@
         </receiver>
         <receiver
             android:name="fr.lelab.activity.BootReceiver"
+            android:directBootAware="true"
             android:enabled="true"
             android:exported="true" >
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
         <receiver
             android:name="fr.lelab.activity.LocationReceiver"
+            android:directBootAware="true"
             android:enabled="true"
-            android:exported="false" />
+            android:exported="true" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -26,11 +26,11 @@ public class JsonStorageHelper {
         File file = new File(context.getFilesDir(), FILE_NAME);
         
         JSObject location = new JSObject();
+        location.put("type", "location"); // Ajout d'un tag type pour différencier dans le JSONL
         location.put("lat", lat);
         location.put("lng", lng);
         location.put("speed", speed);
         location.put("date", getFormattedDate());
-        // MODIF : On garde les millisecondes (suppression du / 1000)
         location.put("timestamp", System.currentTimeMillis());
 
         String entry = location.toString() + "\n";
@@ -43,7 +43,7 @@ public class JsonStorageHelper {
     }
 
     /**
-     * AJOUT : Sauvegarde un changement d'activité pour ActivityTransitionReceiver
+     * Sauvegarde un changement d'activité
      */
     public static void saveActivity(Context context, String activityName, String transitionName) {
         File file = new File(context.getFilesDir(), FILE_NAME);
@@ -107,16 +107,19 @@ public class JsonStorageHelper {
         obj.put("lat", location.getLatitude());
         obj.put("lng", location.getLongitude());
         obj.put("speed", location.getSpeed());
-        // MODIF : On garde les millisecondes (suppression du / 1000)
         obj.put("timestamp", location.getTime());
         return obj;
     }
 
+    /**
+     * Purge les données anciennes de manière sécurisée
+     */
     public static void purgeLocationsBefore(Context context, long timestampLimit) {
         File file = new File(context.getFilesDir(), FILE_NAME);
         if (!file.exists()) return;
 
         File tempFile = new File(context.getFilesDir(), "temp_purge.json");
+        boolean hasDataLeft = false;
 
         try (BufferedReader br = new BufferedReader(new FileReader(file));
              FileOutputStream fos = new FileOutputStream(tempFile)) {
@@ -131,19 +134,28 @@ public class JsonStorageHelper {
 
                     if (pointTimestamp >= timestampLimit) {
                         fos.write((line + "\n").getBytes());
+                        hasDataLeft = true;
                     }
                 } catch (Exception e) {
-                    // Ligne corrompue ignorée
+                    // Ignorer les lignes corrompues
                 }
             }
         } catch (IOException e) {
-            Log.e("SmartPilot", "❌ Erreur lors de la purge par timestamp", e);
+            Log.e(TAG, "❌ Erreur lors de la purge", e);
         }
 
+        // Remplacement atomique du fichier
         if (tempFile.exists()) {
-            if (file.delete()) {
-                tempFile.renameTo(file);
+            if (hasDataLeft) {
+                if (file.delete()) {
+                    tempFile.renameTo(file);
+                }
+            } else {
+                // Si plus rien ne reste, on supprime tout
+                file.delete();
+                tempFile.delete();
             }
+            Log.d(TAG, "🧹 Purge terminée.");
         }
     }
 }

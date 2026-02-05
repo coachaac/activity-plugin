@@ -1,6 +1,7 @@
 package fr.lelab.activity;
 
 import android.app.*;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.content.SharedPreferences;
@@ -25,40 +26,38 @@ public class TrackingService extends Service {
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
     }
 
+    private Context getSafeContext() {
+        return (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) 
+            ? createDeviceProtectedStorageContext() 
+            : this;
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // On récupère l'état pour savoir si on doit vraiment tourner
-        SharedPreferences prefs = getSharedPreferences("CapacitorStorage", MODE_PRIVATE);
-        boolean wasTracking = prefs.getBoolean("tracking_active", false);
+        // Utilisation du stockage protégé pour vérifier l'état au reboot
+        SharedPreferences prefs = getSafeContext().getSharedPreferences("CapacitorStorage", MODE_PRIVATE);
         boolean wasDriving = prefs.getBoolean("driving_state", false);
 
-        // On autorise le démarrage si l'action est la bonne OU si le système nous relance (intent null)
-        // mais seulement si l'utilisateur n'avait pas fait "STOP" manuellement.
+        // Si le système relance le service (intent null) mais que l'état n'était pas "conduite"
         if (intent == null && !wasDriving) {
-            Log.d("TrackingService", "⚠️ Relance système mais pas en mode conduite, arrêt.");
+            Log.d("TrackingService", "⚠️ Relance système hors conduite, arrêt.");
             stopSelf();
             return START_NOT_STICKY;
         }
 
-        Log.d("TrackingService", "⚡ Service démarré ou restauré.");
+        Log.d("TrackingService", "⚡ Service démarré ou restauré. Conduite: " + wasDriving);
         
-        Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Coach AAC")
-                .setContentText("Trajet en cours d'enregistrement...")
-                .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-                .setOngoing(true)
-                .setCategory(Notification.CATEGORY_SERVICE)
-                .build();
-
         createNotificationChannel();
+        Notification notification = createNotification();
 
-
+        // Android 14 impose de spécifier le type FOREGROUND_SERVICE_TYPE_LOCATION
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
         } else {
             startForeground(NOTIFICATION_ID, notification);
         }
 
+        // On ne relance pas les updates si elles tournent déjà
         if (locationPendingIntent == null) {
             startLocationUpdates();
         }
@@ -66,22 +65,35 @@ public class TrackingService extends Service {
         return START_STICKY; 
     }
 
+    private Notification createNotification() {
+        return new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("Coach AAC")
+                .setContentText("Trajet en cours d'enregistrement...")
+                .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+                .setOngoing(true)
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                .setCategory(Notification.CATEGORY_SERVICE)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build();
+    }
+
     private void startLocationUpdates() {
-        // Utilisation du Builder (obligatoire pour Android 14-16)
+        // Configuration optimisée pour la conduite
         LocationRequest locationRequest = new LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000)
-                .setMinUpdateIntervalMillis(2000) // Maximum 1 point toutes les 2s
-                .setMinUpdateDistanceMeters(10)   // Minimum 10 mètres entre deux points
+                .setMinUpdateIntervalMillis(2000)
+                .setMinUpdateDistanceMeters(5) // On descend à 5m pour plus de précision en ville
                 .setWaitForAccurateLocation(true)
                 .build();
 
         Intent intent = new Intent(this, LocationReceiver.class);
-        // On garde FLAG_MUTABLE car Google Play Services doit injecter la "Location" dans l'Intent
-        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+        
+        // FLAG_MUTABLE est impératif pour que le système injecte la position
+        int pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            flags |= PendingIntent.FLAG_MUTABLE;
+            pendingFlags |= PendingIntent.FLAG_MUTABLE;
         }
         
-        locationPendingIntent = PendingIntent.getBroadcast(this, 1, intent, flags);
+        locationPendingIntent = PendingIntent.getBroadcast(this, 1, intent, pendingFlags);
 
         try {
             fusedLocationClient.requestLocationUpdates(locationRequest, locationPendingIntent);
@@ -102,7 +114,9 @@ public class TrackingService extends Service {
         
         stopForeground(true);
         NotificationManager notificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        notificationManager.cancel(NOTIFICATION_ID);
+        if (notificationManager != null) {
+            notificationManager.cancel(NOTIFICATION_ID);
+        }
 
         super.onDestroy();
     }
@@ -116,7 +130,7 @@ public class TrackingService extends Service {
                 "Suivi de trajet", 
                 NotificationManager.IMPORTANCE_LOW
             );
-            channel.setDescription("Utilisé pour le suivi GPS en conduite");
+            channel.setShowBadge(false);
             NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager != null) manager.createNotificationChannel(channel);
         }

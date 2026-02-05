@@ -10,35 +10,43 @@ import android.util.Log;
 public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
-        if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
-            Log.d("SmartPilot", "🚀 Boot détecté : vérification de l'état du tracking");
+        String action = intent.getAction();
+        Log.d("SmartPilot", "🚀 Boot détecté : Action = " + action);
 
-            // On récupère l'état sauvegardé par Capacitor
-            SharedPreferences prefs = context.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
+        // On accepte BOOT_COMPLETED et LOCKED_BOOT_COMPLETED (pour le Direct Boot)
+        if (Intent.ACTION_BOOT_COMPLETED.equals(action) || 
+            "android.intent.action.LOCKED_BOOT_COMPLETED".equals(action)) {
+
+            // --- CRITIQUE : Utilisation du SafeContext pour le Direct Boot ---
+            Context safeContext = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) 
+                ? context.createDeviceProtectedStorageContext() 
+                : context;
+
+            SharedPreferences prefs = safeContext.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
             boolean wasTrackingActive = prefs.getBoolean("tracking_active", false);
             boolean wasDriving = prefs.getBoolean("driving_state", false);
 
             if (wasTrackingActive) {
-                Log.d("SmartPilot", "✅ Le tracking était actif, réactivation...");
+                Log.d("SmartPilot", "✅ Réactivation du moteur de détection d'activité...");
                 
-                // 1. Relancer la reconnaissance d'activité (pour détecter les futurs trajets)
-                ActivityRecognition implementation = new ActivityRecognition(context);
+                // 1. Relancer la reconnaissance d'activité
+                ActivityRecognition implementation = new ActivityRecognition(safeContext);
                 implementation.startTracking();
 
-                // 2. Si on était en plein trajet lors de l'extinction, on relance le GPS immédiatement
+                // 2. Relancer le GPS uniquement si on était en conduite active
                 if (wasDriving) {
-                    Log.d("SmartPilot", "🚗 On était en conduite, relance du Foreground Service");
-                    Intent serviceIntent = new Intent(context, TrackingService.class);
+                    Log.d("SmartPilot", "🚗 Reprise du suivi GPS (Conduite active avant reboot)");
+                    Intent serviceIntent = new Intent(safeContext, TrackingService.class);
                     serviceIntent.setAction(TrackingService.ACTION_START_TRACKING);
                     
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        context.startForegroundService(serviceIntent);
+                        safeContext.startForegroundService(serviceIntent);
                     } else {
-                        context.startService(serviceIntent);
+                        safeContext.startService(serviceIntent);
                     }
                 }
             } else {
-                Log.d("SmartPilot", "🛑 Le tracking n'était pas actif, on ne fait rien.");
+                Log.d("SmartPilot", "🛑 Mode tracking désactivé par l'utilisateur, repos.");
             }
         }
     }

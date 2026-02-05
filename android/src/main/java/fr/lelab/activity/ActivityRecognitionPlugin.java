@@ -22,6 +22,7 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.PermissionState;
 
 @CapacitorPlugin(
     name = "ActivityRecognition",
@@ -40,14 +41,19 @@ import com.getcapacitor.annotation.Permission;
         )
     }
 )
-
 public class ActivityRecognitionPlugin extends Plugin {
 
     private ActivityRecognition implementation;
     private static ActivityRecognitionPlugin instance;
-
     private boolean debugMode = false;
     private boolean isDriving = false;
+
+    // --- HELPER : Stockage protégé pour le reboot (Direct Boot) ---
+    private Context getSafeContext() {
+        return (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) 
+            ? getContext().createDeviceProtectedStorageContext() 
+            : getContext();
+    }
 
     @Override
     public void load() {
@@ -55,8 +61,8 @@ public class ActivityRecognitionPlugin extends Plugin {
         instance = this;
         implementation = new ActivityRecognition(getContext());
 
-        // On récupère l'état sauvegardé
-        SharedPreferences prefs = getContext().getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
+        // On utilise getSafeContext() pour que l'état survive même si le tel n'est pas déverrouillé
+        SharedPreferences prefs = getSafeContext().getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
         boolean wasTracking = prefs.getBoolean("tracking_active", false);
         boolean wasDriving = prefs.getBoolean("driving_state", false);
 
@@ -66,24 +72,18 @@ public class ActivityRecognitionPlugin extends Plugin {
             
             if (wasDriving) {
                 Log.d("SmartPilot", "🚗 Reprise du tracking GPS (Foreground Service)");
-                // On relance le service (Android gérera si déjà lancé)
                 Intent intent = new Intent(getContext(), TrackingService.class);
-                intent.setAction(TrackingService.ACTION_START_TRACKING);
+                intent.setAction("fr.lelab.activity.START_TRACKING");
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     getContext().startForegroundService(intent);
                 } else {
                     getContext().startService(intent);
                 }
             }
-        } else {
-            // Nettoyage uniquement si rien n'est actif
-            Intent intent = new Intent(getContext(), TrackingService.class);
-            getContext().stopService(intent);
         }
     }
 
-
-    // vibrate helper
+    // --- VIBRATION HELPER (Inchangé) ---
     private void triggerVibration(int count) {
         Vibrator v = (Vibrator) getContext().getSystemService(Context.VIBRATOR_SERVICE);
         if (v == null || !v.hasVibrator()) return;
@@ -96,56 +96,67 @@ public class ActivityRecognitionPlugin extends Plugin {
                 v.vibrate(VibrationEffect.createOneShot(300, VibrationEffect.DEFAULT_AMPLITUDE));
             }
         } else {
-            // Retro compatibility Android 7
             v.vibrate(count == 2 ? 500 : 300);
         }
     }
 
-
-    // Detect Event location
+    // --- EVENTS (Appelés par les Receivers) ---
     public static void onLocationEvent(JSObject data) {
         if (instance != null) {
-            // On ne fait QUE notifier le JS pour l'affichage
             instance.notifyListeners("onLocationUpdate", data);
         }
     }
-
 
     public static void onActivityEvent(JSObject data) {
         if (instance != null) {
             String activityType = data.getString("activity");
             String transition = data.getString("transition");
             
-            // Mise à jour de l'état local pour le filtrage
             if ("automotive".equals(activityType) && "ENTER".equals(transition)) {
                 instance.isDriving = true;
                 if (instance.debugMode) instance.triggerVibration(2);
             } else if ("automotive".equals(activityType) && "EXIT".equals(transition)) {
-                // On garde isDriving à true jusqu'à la fin réelle du service (Grace Period)
-                // Ou on laisse le Receiver gérer l'arrêt complet.
                 if (instance.debugMode) instance.triggerVibration(1);
             }
-
+            // Nom du listener harmonisé avec le JS
             instance.notifyListeners("activityChange", data);
         }
     }
 
+    // --- PLUGIN METHODS (Interface JS) ---
 
+    @PluginMethod
+    public void checkPermissions(PluginCall call) {
+        JSObject ret = new JSObject();
+        
+        // Récupération des états précis
+        String activityState = getPermissionState("activity").toString();
+        String locationState = getPermissionState("backgroundLocation").toString();
+        
+        // On renvoie un objet détaillé
+        ret.put("activity", activityState); // renverra "granted", "denied" ou "prompt"
+        ret.put("location", locationState);
+        
+        // On garde 'granted' pour la compatibilité globale si besoin
+        ret.put("granted", getPermissionState("activity") == com.getcapacitor.PermissionState.GRANTED 
+                && getPermissionState("backgroundLocation") == com.getcapacitor.PermissionState.GRANTED);
+        
+        call.resolve(ret);
+    }
 
     @PluginMethod
     public void startTracking(PluginCall call) {
-        // check if all Ok
         if (!isSystemReady()) {
-            call.reject("Le système n'est pas prêt. Vérifiez les permissions (Activité et Position 'Toujours') et activez le GPS.");
+            call.reject("Le système n'est pas prêt. Vérifiez les permissions et le GPS.");
             return;
         }
-
-        // get value of debug Mode
         this.debugMode = call.getBoolean("debug", false);
-
         this.isDriving = false;
 
-        // ✅ start activity sensor
+        // Sauvegarde de l'état "Actif"
+        getSafeContext().getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
+            .edit().putBoolean("tracking_active", true).apply();
+
         implementation.startTracking();
         call.resolve();
     }
@@ -153,13 +164,19 @@ public class ActivityRecognitionPlugin extends Plugin {
     @PluginMethod
     public void stopTracking(PluginCall call) {
         isDriving = false;
+        // Mise à jour de l'état "Inactif"
+        getSafeContext().getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
+            .edit().putBoolean("tracking_active", false)
+            .putBoolean("driving_state", false).apply();
+
         implementation.stopTracking();
         call.resolve();
     }
 
     @PluginMethod
     public void getSavedLocations(PluginCall call) {
-        JSArray locations = JsonStorageHelper.loadLocationsAsJSArray(getContext());
+        // Lecture dans le stockage sécurisé (Direct Boot Aware)
+        JSArray locations = JsonStorageHelper.loadLocationsAsJSArray(getSafeContext());
         JSObject ret = new JSObject();
         ret.put("locations", locations);
         call.resolve(ret);
@@ -167,34 +184,23 @@ public class ActivityRecognitionPlugin extends Plugin {
 
     @PluginMethod
     public void clearSavedLocations(PluginCall call) {
-        JsonStorageHelper.clearLocations(getContext());
+        JsonStorageHelper.clearLocations(getSafeContext());
         call.resolve();
     }
 
     @PluginMethod
     public void shareSavedLocations(PluginCall call) {
         try {
-            File file = new File(getContext().getFilesDir(), "stored_locations.json");
-
+            File file = new File(getSafeContext().getFilesDir(), "stored_locations.json");
             if (!file.exists()) {
                 call.reject("Fichier introuvable.");
                 return;
             }
-
-            // Utilisation de l'utilitaire Capacitor pour le partage
             Intent intent = new Intent(Intent.ACTION_SEND);
             intent.setType("application/json");
-            
-            // Création de l'URI sécurisée via FileProvider
-            Uri fileUri = FileProvider.getUriForFile(
-                getContext(),
-                getContext().getPackageName() + ".fileprovider",
-                file
-            );
-
+            Uri fileUri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", file);
             intent.putExtra(Intent.EXTRA_STREAM, fileUri);
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-
             getContext().startActivity(Intent.createChooser(intent, "Partager les positions"));
             call.resolve();
         } catch (Exception e) {
@@ -202,87 +208,31 @@ public class ActivityRecognitionPlugin extends Plugin {
         }
     }
 
-    private boolean isSystemReady() {
-        Context context = getContext();
-        
-        // 1. Check Activité Physique (Android 10+)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            if (context.checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) 
-                != PackageManager.PERMISSION_GRANTED) {
-                Log.e("SmartPilot", "❌ Permission Activité Physique manquante");
-                return false;
-            }
-        }
-        
-        // 2. Check Background Location (Android 11+)
-        // Crucial pour que le GPS ne se coupe pas quand on verrouille l'écran
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (context.checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) 
-                != PackageManager.PERMISSION_GRANTED) {
-                Log.e("SmartPilot", "❌ Permission Localisation en arrière-plan manquante");
-                return false;
-            }
-        }
-
-        // 3. Check si le GPS est activé au niveau système
-        LocationManager lm = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
-        if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-            Log.e("SmartPilot", "❌ Le GPS est désactivé dans les réglages système");
-            return false;
-        }
-
-        // 4. Check Optimisation Batterie (Doze Mode)
-        PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            String packageName = context.getPackageName();
-            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-                Log.w("SmartPilot", "⚠️ L'application est soumise à l'optimisation de batterie.");
-                // Ici, on ne bloque pas forcément le démarrage (return false), 
-                // mais on peut envoyer un avertissement ou ouvrir les réglages.
-                requestIgnoreBatteryOptimizations();
-            }
-        }
-
-        Log.d("SmartPilot", "✅ Système prêt pour le tracking (Android " + Build.VERSION.RELEASE + ")");
-        return true;
-    }
-
-
-    private void requestIgnoreBatteryOptimizations() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            try {
-                Intent intent = new Intent();
-                intent.setAction(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
-                intent.setData(android.net.Uri.parse("package:" + getContext().getPackageName()));
-                intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                getContext().startActivity(intent);
-            } catch (Exception e) {
-                // Si l'intent direct échoue, on ouvre la liste globale
-                Intent intent = new Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
-                intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                getContext().startActivity(intent);
-            }
-        }
-    }
-
-
     @PluginMethod
     public void purgeLocationsBefore(PluginCall call) {
-        // On récupère le timestamp envoyé par le JS
         Long timestampLimit = call.getLong("timestamp");
+        if (timestampLimit == null) timestampLimit = call.getLong("before");
 
-        if (timestampLimit == null) {
-            call.reject("Le paramètre 'timestamp' est obligatoire.");
-            return;
-        }
-
-        try {
-            JsonStorageHelper.purgeLocationsBefore(getContext(), timestampLimit.longValue());
+        if (timestampLimit != null) {
+            JsonStorageHelper.purgeLocationsBefore(getSafeContext(), timestampLimit);
             call.resolve();
-        } catch (Exception e) {
-            call.reject("Erreur lors de la purge : " + e.getLocalizedMessage());
+        } else {
+            call.reject("Le paramètre 'timestamp' ou 'before' est obligatoire.");
         }
     }
 
+    // --- SYSTEM CHECK (Permissions et Capteurs) ---
+    private boolean isSystemReady() {
+        Context context = getContext();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (context.checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) return false;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (context.checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) return false;
+        }
+        LocationManager lm = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
+        if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) return false;
 
+        return true;
+    }
 }
