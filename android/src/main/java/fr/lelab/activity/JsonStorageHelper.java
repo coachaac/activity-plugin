@@ -20,13 +20,25 @@ public class JsonStorageHelper {
     private static final String TAG = "JsonStorageHelper";
 
     /**
-     * Sauvegarde une position en mode APPEND
+    * Return Device Protected Storage
+     * Allow read/write even before pin verification
+     * */
+    private static File getSafeFilesDir(Context context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            return context.createDeviceProtectedStorageContext().getFilesDir();
+        }
+        return context.getFilesDir();
+    }
+
+
+    /**
+     * Save location APPEND mode
      */
     public static void saveLocation(Context context, double lat, double lng, float speed) {
-        File file = new File(context.getFilesDir(), FILE_NAME);
+        File file = new File(getSafeFilesDir(context), FILE_NAME);
         
         JSObject location = new JSObject();
-        location.put("type", "location"); // Ajout d'un tag type pour différencier dans le JSONL
+        location.put("type", "location"); 
         location.put("lat", lat);
         location.put("lng", lng);
         location.put("speed", speed);
@@ -46,7 +58,7 @@ public class JsonStorageHelper {
      * Sauvegarde un changement d'activité
      */
     public static void saveActivity(Context context, String activityName, String transitionName) {
-        File file = new File(context.getFilesDir(), FILE_NAME);
+        File file = new File(getSafeFilesDir(context), FILE_NAME);
         
         JSObject activity = new JSObject();
         activity.put("type", "activity");
@@ -66,7 +78,7 @@ public class JsonStorageHelper {
     }
 
     public static JSArray loadLocationsAsJSArray(Context context) {
-        File file = new File(context.getFilesDir(), FILE_NAME);
+        File file = new File(getSafeFilesDir(context), FILE_NAME);
         JSArray locations = new JSArray();
 
         if (!file.exists()) return locations;
@@ -90,7 +102,7 @@ public class JsonStorageHelper {
     }
 
     public static void clearLocations(Context context) {
-        File file = new File(context.getFilesDir(), FILE_NAME);
+        File file = new File(getSafeFilesDir(context), FILE_NAME);
         if (file.exists()) {
             boolean deleted = file.delete();
             Log.d(TAG, "🗑️ Fichier supprimé : " + deleted);
@@ -115,10 +127,10 @@ public class JsonStorageHelper {
      * Purge les données anciennes de manière sécurisée
      */
     public static void purgeLocationsBefore(Context context, long timestampLimit) {
-        File file = new File(context.getFilesDir(), FILE_NAME);
+        File file = new File(getSafeFilesDir(context), FILE_NAME);
         if (!file.exists()) return;
 
-        File tempFile = new File(context.getFilesDir(), "temp_purge.json");
+        File tempFile = new File(getSafeFilesDir(context), "temp_purge.json");
         boolean hasDataLeft = false;
 
         try (BufferedReader br = new BufferedReader(new FileReader(file));
