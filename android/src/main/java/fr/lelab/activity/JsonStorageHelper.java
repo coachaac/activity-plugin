@@ -1,6 +1,7 @@
 package fr.lelab.activity;
 
 import android.content.Context;
+import android.os.Build;
 import android.util.Log;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -50,7 +51,7 @@ public class JsonStorageHelper {
         try (FileOutputStream fos = new FileOutputStream(file, true)) {
             fos.write(entry.getBytes());
         } catch (IOException e) {
-            Log.e(TAG, "❌ Erreur lors de l'écriture Append position", e);
+            Log.e(TAG, "❌ Error during Append position writing", e);
         }
     }
 
@@ -71,9 +72,9 @@ public class JsonStorageHelper {
 
         try (FileOutputStream fos = new FileOutputStream(file, true)) {
             fos.write(entry.getBytes());
-            Log.d(TAG, "🏃 Activité enregistrée : " + activityName);
+            Log.d(TAG, "🏃 Activity registered : " + activityName);
         } catch (IOException e) {
-            Log.e(TAG, "❌ Erreur lors de l'écriture Append activité", e);
+            Log.e(TAG, "❌ Error during Append activity writing", e);
         }
     }
 
@@ -90,12 +91,12 @@ public class JsonStorageHelper {
                     try {
                         locations.put(new JSObject(line));
                     } catch (JSONException e) {
-                        Log.e(TAG, "Ligne JSON malformée ignorée", e);
+                        Log.e(TAG, "malformed JSON line ignored", e);
                     }
                 }
             }
         } catch (IOException e) {
-            Log.e(TAG, "Erreur lors de la lecture du fichier", e);
+            Log.e(TAG, "Erreor reading file", e);
         }
 
         return locations;
@@ -105,7 +106,7 @@ public class JsonStorageHelper {
         File file = new File(getSafeFilesDir(context), FILE_NAME);
         if (file.exists()) {
             boolean deleted = file.delete();
-            Log.d(TAG, "🗑️ Fichier supprimé : " + deleted);
+            Log.d(TAG, "🗑️ File deleted : " + deleted);
         }
     }
 
@@ -124,9 +125,10 @@ public class JsonStorageHelper {
     }
 
     /**
-     * Purge les données anciennes de manière sécurisée
+     * Secure Purge of old data
      */
-    public static void purgeLocationsBefore(Context context, long timestampLimit) {
+    public static void purgeLocationsBefore(Context context, long timestampLimit) 
+    {
         File file = new File(getSafeFilesDir(context), FILE_NAME);
         if (!file.exists()) return;
 
@@ -153,21 +155,68 @@ public class JsonStorageHelper {
                 }
             }
         } catch (IOException e) {
-            Log.e(TAG, "❌ Erreur lors de la purge", e);
+            Log.e(TAG, "❌ Error during purge", e);
         }
 
-        // Remplacement atomique du fichier
+        // Remplace file
         if (tempFile.exists()) {
             if (hasDataLeft) {
                 if (file.delete()) {
                     tempFile.renameTo(file);
                 }
             } else {
-                // Si plus rien ne reste, on supprime tout
+                // nothing remain supprress all
                 file.delete();
                 tempFile.delete();
             }
-            Log.d(TAG, "🧹 Purge terminée.");
+            Log.d(TAG, "🧹 Purge ended.");
+        }
+    }
+
+
+    /**
+     * Secure partial purge
+     */
+    public static void purgeLocationsBetween(Context context, long from, long to) {
+        File safeDir = getSafeFilesDir(context); 
+        File file = new File(safeDir, FILE_NAME);
+        if (!file.exists()) return;
+
+        File tempFile = new File(safeDir, "temp_purge_between.json");
+        boolean hasDataLeft = false;
+
+        try (BufferedReader br = new BufferedReader(new FileReader(file));
+             FileOutputStream fos = new FileOutputStream(tempFile)) {
+            
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.trim().isEmpty()) continue;
+                
+                try {
+                    JSObject obj = new JSObject(line);
+                    long pointTimestamp = obj.getLong("timestamp");
+
+                    // keep line not between from and to
+                    if (pointTimestamp < from || pointTimestamp > to) {
+                        fos.write((line + "\n").getBytes());
+                        hasDataLeft = true;
+                    }
+                } catch (Exception e) {
+                    // securitycorrupted line not kept
+                }
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "❌ Error during purge Between", e);
+        }
+
+        // Remplacement du fichier original
+        if (file.delete()) {
+            if (hasDataLeft) {
+                tempFile.renameTo(file);
+            } else {
+                tempFile.delete();
+            }
+            Log.d(TAG, "🧹 Purge betwwen " + from + " and " + to + " ended.");
         }
     }
 }

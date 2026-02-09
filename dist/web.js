@@ -30,5 +30,8 @@ export class ActivityRecognitionWeb extends WebPlugin {
     async purgeLocationsBefore(options) {
         console.log('🌐 Web implementation: purgeLocationsBefore called with timestamp:', options.timestamp);
     }
+    async purgeLocationsBetween(options) {
+        console.log('🌐 Web implementation: purgeLocationsBetween called with from: ', options.from, ' to: ', options.to);
+    }
 }
 //# sourceMappingURL=web.js.map

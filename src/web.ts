@@ -40,5 +40,9 @@ export class ActivityRecognitionWeb extends WebPlugin implements ActivityRecogni
   async purgeLocationsBefore(options: { timestamp: number }): Promise<void> {
     console.log('🌐 Web implementation: purgeLocationsBefore called with timestamp:', options.timestamp);
   }
+
+  async purgeLocationsBetween(options: { from: number, to:number }): Promise<void> {
+    console.log('🌐 Web implementation: purgeLocationsBetween called with from: ',options.from, ' to: ',options.to);
+  }
   
 }

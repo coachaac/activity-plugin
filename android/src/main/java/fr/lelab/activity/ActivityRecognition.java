@@ -36,7 +36,7 @@ public class ActivityRecognition {
 
     // --- GPS Management ---
     public void startGPSUpdates() {
-        Log.d(TAG, "🚗 Tentative de démarrage du Tracking Service");
+        Log.d(TAG, "🚗 Try to start Tracking Service");
         saveState("driving_state", true);
 
         Intent intent = new Intent(context, TrackingService.class);
@@ -51,7 +51,7 @@ public class ActivityRecognition {
     }
 
     public void stopGPSUpdates() {
-        Log.d(TAG, "🔋 Arrêt du mode conduite");
+        Log.d(TAG, "🔋 Stop activity automotive");
         saveState("driving_state", false);
         
         Intent intent = new Intent(context, TrackingService.class);
@@ -60,7 +60,7 @@ public class ActivityRecognition {
 
     // --- Activity Management ---
     public void startTracking() {
-        Log.d(TAG, "📡 Activation de la reconnaissance d'activité");
+        Log.d(TAG, "📡 Start Activity Recognition");
         saveState("tracking_active", true);
         setupActivityTransitions();
     }
@@ -93,9 +93,9 @@ public class ActivityRecognition {
             activityClient.requestActivityTransitionUpdates(
                 new ActivityTransitionRequest(transitions), 
                 activityPendingIntent
-            ).addOnSuccessListener(aVoid -> Log.i(TAG, "✅ Capteurs d'activité OK"));
+            ).addOnSuccessListener(aVoid -> Log.i(TAG, "✅ Activity sensor OK"));
         } catch (SecurityException e) { 
-            Log.e(TAG, "❌ Erreur permissions", e); 
+            Log.e(TAG, "❌  permissions Error", e); 
         }
     }
 

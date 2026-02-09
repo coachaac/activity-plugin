@@ -15,4 +15,8 @@ export declare class ActivityRecognitionWeb extends WebPlugin implements Activit
     purgeLocationsBefore(options: {
         timestamp: number;
     }): Promise<void>;
+    purgeLocationsBetween(options: {
+        from: number;
+        to: number;
+    }): Promise<void>;
 }

@@ -17,16 +17,14 @@ public class LocationReceiver extends BroadcastReceiver {
         LocationResult locationResult = LocationResult.extractResult(intent);
         if (locationResult == null) return;
 
-        // --- OPTIMISATION : Accès au stockage protégé (Direct Boot) ---
-        // On s'assure que le contexte utilisé pour le Helper peut écrire même si le tel est verrouillé
+        // --- Protexted Access (Direct Boot) ---
         Context safeContext = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) 
             ? context.createDeviceProtectedStorageContext() 
             : context;
 
         for (Location location : locationResult.getLocations()) {
             
-            // 1. Sauvegarde DIRECTE dans le fichier JSONL
-            // On utilise le safeContext pour garantir l'écriture en toute circonstance
+            // 1. Save in JSON file
             JsonStorageHelper.saveLocation(
                 safeContext, 
                 location.getLatitude(), 
@@ -34,13 +32,13 @@ public class LocationReceiver extends BroadcastReceiver {
                 location.getSpeed()
             );
 
-            // 2. Notification au Plugin (Interface UI)
-            // Note : Si l'app est fermée, ActivityRecognitionPlugin.instance sera null
-            // et l'événement sera simplement ignoré (c'est le comportement voulu).
+            // 2. Notify plugin (UI Interface)
+            // Note : if App closed ActivityRecognitionPlugin.instance is null
+            // event ignored (as requested).
             JSObject data = JsonStorageHelper.locationToJSObject(location);
             ActivityRecognitionPlugin.onLocationEvent(data);
             
-            Log.d("SmartPilot", "📍 Point GPS sauvegardé : " + location.getLatitude() + "," + location.getLongitude());
+            Log.d("Poisition", "📍 GPS Point saved : " + location.getLatitude() + "," + location.getLongitude());
         }
     }
 }

@@ -61,17 +61,17 @@ public class ActivityRecognitionPlugin extends Plugin {
         instance = this;
         implementation = new ActivityRecognition(getContext());
 
-        // On utilise getSafeContext() pour que l'état survive même si le tel n'est pas déverrouillé
+        // Use getSafeContext() accessible even if phone not unlocked
         SharedPreferences prefs = getSafeContext().getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
         boolean wasTracking = prefs.getBoolean("tracking_active", false);
         boolean wasDriving = prefs.getBoolean("driving_state", false);
 
         if (wasTracking) {
-            Log.d("SmartPilot", "🔄 Relance automatique de la détection d'activité");
+            Log.d("SmartPilot", "🔄 Automatic activity detection re-launched");
             implementation.startTracking();
             
             if (wasDriving) {
-                Log.d("SmartPilot", "🚗 Reprise du tracking GPS (Foreground Service)");
+                Log.d("SmartPilot", "🚗 Restart GPS tracking (Foreground Service)");
                 Intent intent = new Intent(getContext(), TrackingService.class);
                 intent.setAction("fr.lelab.activity.START_TRACKING");
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -100,7 +100,7 @@ public class ActivityRecognitionPlugin extends Plugin {
         }
     }
 
-    // --- EVENTS (Appelés par les Receivers) ---
+    // --- EVENTS (Called by Receivers) ---
     public static void onLocationEvent(JSObject data) {
         if (instance != null) {
             instance.notifyListeners("onLocationUpdate", data);
@@ -134,7 +134,7 @@ public class ActivityRecognitionPlugin extends Plugin {
         String locationState = getPermissionState("backgroundLocation").toString();
         
         // On renvoie un objet détaillé
-        ret.put("activity", activityState); // renverra "granted", "denied" ou "prompt"
+        ret.put("activity", activityState); // "granted", "denied" or "prompt"
         ret.put("location", locationState);
         
         // On garde 'granted' pour la compatibilité globale si besoin
@@ -147,7 +147,7 @@ public class ActivityRecognitionPlugin extends Plugin {
     @PluginMethod
     public void startTracking(PluginCall call) {
         if (!isSystemReady()) {
-            call.reject("Le système n'est pas prêt. Vérifiez les permissions et le GPS.");
+            call.reject("System not ready. Verify permissions and GPS.");
             return;
         }
         this.debugMode = call.getBoolean("debug", false);
@@ -188,23 +188,51 @@ public class ActivityRecognitionPlugin extends Plugin {
         call.resolve();
     }
 
+
     @PluginMethod
     public void shareSavedLocations(PluginCall call) {
         try {
-            File file = new File(getSafeContext().getFilesDir(), "stored_locations.json");
-            if (!file.exists()) {
-                call.reject("Fichier introuvable.");
+
+            Context safeContext = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) 
+                ? getContext().createDeviceProtectedStorageContext() 
+                : getContext();
+
+            File sourceFile = new File(safeContext.getFilesDir(), "stored_locations.json");
+            
+            if (!sourceFile.exists()) {
+                call.reject("File not Found!");
                 return;
             }
-            Intent intent = new Intent(Intent.ACTION_SEND);
-            intent.setType("application/json");
-            Uri fileUri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", file);
-            intent.putExtra(Intent.EXTRA_STREAM, fileUri);
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            getContext().startActivity(Intent.createChooser(intent, "Partager les positions"));
+
+            // create sharing zone accessible outside plugin
+            File tempFile = new File(getContext().getCacheDir(), "trajet_export.json");
+        
+            // copy file
+            java.nio.file.Files.copy(
+                sourceFile.toPath(), 
+                tempFile.toPath(), 
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING
+            );
+
+            // share from cache
+            Uri contentUri = FileProvider.getUriForFile(
+                getContext(),
+                getContext().getPackageName() + ".fileprovider",
+                tempFile
+            );
+
+            Intent shareIntent = new Intent(Intent.ACTION_SEND);
+            shareIntent.setType("application/json");
+            shareIntent.putExtra(Intent.EXTRA_STREAM, contentUri);
+            shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+            Intent chooser = Intent.createChooser(shareIntent, "Share File");
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(chooser);
+
             call.resolve();
         } catch (Exception e) {
-            call.reject("Erreur lors du partage : " + e.getLocalizedMessage());
+            call.reject("Share file error : " + e.getLocalizedMessage());
         }
     }
 
@@ -217,9 +245,22 @@ public class ActivityRecognitionPlugin extends Plugin {
             JsonStorageHelper.purgeLocationsBefore(getSafeContext(), timestampLimit);
             call.resolve();
         } else {
-            call.reject("Le paramètre 'timestamp' ou 'before' est obligatoire.");
+            call.reject(" 'timestamp' parameter mandatory");
         }
     }
+
+    @PluginMethod
+        public void purgeLocationsBetween(PluginCall call) {
+            Long from = call.getLong("from");
+            Long to = call.getLong("to");
+
+            if (from != null && to != null) {
+                JsonStorageHelper.purgeLocationsBetween(getSafeContext(), from, to);
+                call.resolve();
+            } else {
+                call.reject("Parameters 'from' and 'to' (timestamps) are mandatory");
+            }
+        }
 
     // --- SYSTEM CHECK (Permissions et Capteurs) ---
     private boolean isSystemReady() {
@@ -235,4 +276,7 @@ public class ActivityRecognitionPlugin extends Plugin {
 
         return true;
     }
+
+
+
 }

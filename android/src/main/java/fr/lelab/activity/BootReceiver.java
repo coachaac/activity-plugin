@@ -11,13 +11,13 @@ public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         String action = intent.getAction();
-        Log.d("SmartPilot", "🚀 Boot détecté : Action = " + action);
+        Log.d("Activity Plugin", "🚀 Boot detected : Action = " + action);
 
-        // On accepte BOOT_COMPLETED et LOCKED_BOOT_COMPLETED (pour le Direct Boot)
+        // BOOT_COMPLETED et LOCKED_BOOT_COMPLETED (Direct Boot)
         if (Intent.ACTION_BOOT_COMPLETED.equals(action) || 
             "android.intent.action.LOCKED_BOOT_COMPLETED".equals(action)) {
 
-            // --- CRITIQUE : Utilisation du SafeContext pour le Direct Boot ---
+            // --- Safe context used Direct Boot ---
             Context safeContext = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) 
                 ? context.createDeviceProtectedStorageContext() 
                 : context;
@@ -27,15 +27,15 @@ public class BootReceiver extends BroadcastReceiver {
             boolean wasDriving = prefs.getBoolean("driving_state", false);
 
             if (wasTrackingActive) {
-                Log.d("SmartPilot", "✅ Réactivation du moteur de détection d'activité...");
+                Log.d("Activity Plugin", "✅ Activity detection engine re-activated...");
                 
                 // 1. Relancer la reconnaissance d'activité
                 ActivityRecognition implementation = new ActivityRecognition(safeContext);
                 implementation.startTracking();
 
-                // 2. Relancer le GPS uniquement si on était en conduite active
+                // 2. Relauch GPS tracking only if driving before reboot
                 if (wasDriving) {
-                    Log.d("SmartPilot", "🚗 Reprise du suivi GPS (Conduite active avant reboot)");
+                    Log.d("Activity Plugin", "🚗 GPS Tracking restarted (driving before reboot)");
                     Intent serviceIntent = new Intent(safeContext, TrackingService.class);
                     serviceIntent.setAction(TrackingService.ACTION_START_TRACKING);
                     
@@ -46,7 +46,7 @@ public class BootReceiver extends BroadcastReceiver {
                     }
                 }
             } else {
-                Log.d("SmartPilot", "🛑 Mode tracking désactivé par l'utilisateur, repos.");
+                Log.d("Activity Plugin", "🛑 Tracking mode de-activated by user, sleep.");
             }
         }
     }

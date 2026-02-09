@@ -27,26 +27,26 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
         if (intent == null) return;
         String action = intent.getAction();
         
-        // --- OPTIMISATION : Log d'état pour le Debugging en mode veille ---
-        Log.d("SmartPilot", "📩 RECU : Action = " + action);
+        // --- OPTIMISATION : Debug Log  ---
+        Log.d("SmartPilot", "📩 Receved : Action = " + action);
 
-        // --- 1. GESTION DE L'ALARME (ARRÊT GRACE PERIOD) ---
+        // --- 1. ALARM Management (STOP GRACE PERIOD) ---
         if (ACTION_STOP_GPS_GRACE.equals(action)) {
-            Log.d(TAG, "⏱ AlarmManager : Fin du délai de grâce, arrêt définitif du service.");
+            Log.d(TAG, "⏱ AlarmManager : end of grace delay, close service.");
             stopTrackingService(context);
             return;
         }
 
-        // --- 2. GESTION DE LA SIMULATION ADB ---
+        // --- 2. ADB SIMULATION Management ---
         if (intent.hasExtra("com.google.android.gms.location.EXTRA_ACTIVITY_RESULT")) {
             int activityType = intent.getIntExtra("com.google.android.gms.location.EXTRA_ACTIVITY_RESULT", -1);
             int transitionType = intent.getIntExtra("com.google.android.gms.location.EXTRA_TRANSITION_TYPE", 0);
-            Log.d("SmartPilot", "🧪 Simulation ADB détectée !");
+            Log.d("SmartPilot", "🧪 ADB Simulation detected !");
             handleTransition(context, activityType, transitionType);
             return;
         }
 
-        // --- 3. GESTION DU MODE RÉEL ---
+        // --- 3. Event management in real mode ---
         if (ActivityTransitionResult.hasResult(intent)) {
             ActivityTransitionResult result = ActivityTransitionResult.extractResult(intent);
             for (ActivityTransitionEvent event : result.getTransitionEvents()) {
@@ -60,7 +60,7 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
         String transitionName = (transitionType == ActivityTransition.ACTIVITY_TRANSITION_ENTER) ? "ENTER" : "EXIT";
         String normalizedActivity = activityName.toLowerCase().replace("in_vehicle", "automotive");
         
-        Log.d(TAG, "⚡ Traitement : " + normalizedActivity + " [" + transitionName + "]");
+        Log.d(TAG, "⚡ Management : " + normalizedActivity + " [" + transitionName + "]");
 
         // 1. Sauvegarde dans le fichier local JSONL (On utilise le SafeContext pour le reboot)
         Context safeContext = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) 
@@ -68,17 +68,17 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
         
         JsonStorageHelper.saveActivity(safeContext, normalizedActivity, transitionName);
 
-        // 2. Notification en temps réel au JavaScript
+        // 2. Real time Notification to JavaScript
         JSObject data = new JSObject();
         data.put("activity", normalizedActivity);
         data.put("transition", transitionName);
         data.put("timestamp", System.currentTimeMillis()); 
         ActivityRecognitionPlugin.onActivityEvent(data);
 
-        // --- LOGIQUE DE GESTION DU SERVICE GPS ---
+        // --- GPS Management service ---
 
         if (DetectedActivity.IN_VEHICLE == activityType && transitionType == ActivityTransition.ACTIVITY_TRANSITION_ENTER) {
-            Log.d(TAG, "🚗 Détection : Entrée en voiture. Start GPS.");
+            Log.d(TAG, "🚗 Détection : Automotive mode. Start GPS.");
             updateDrivingState(safeContext, true); // Persistance Direct Boot
             cancelGraceAlarm(context);
             startTrackingService(context);
@@ -88,13 +88,13 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
             (transitionType == ActivityTransition.ACTIVITY_TRANSITION_ENTER && DetectedActivity.IN_VEHICLE != activityType)
         ) {
             if (isServiceRunning(context)) {
-                Log.d(TAG, "⏳ Détection : Fin de conduite probable. Timer 3min lancé.");
+                Log.d(TAG, "⏳ Détection : Likely end of automotive activity. Timer 3min launched.");
                 scheduleGraceAlarm(context);
             }
         }
     }
 
-    // --- MISE A JOUR DE L'ETAT POUR LE REBOOT ---
+    // --- update state for REBOOT ---
     private void updateDrivingState(Context safeContext, boolean isDriving) {
         safeContext.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
             .edit().putBoolean("driving_state", isDriving).apply();
@@ -119,7 +119,7 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
                 // Version "Play Store Friendly" : Inexacte mais fonctionne pendant le mode Doze
                 // Le système peut décaler un peu pour grouper les alarmes et économiser la batterie.
                 am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi);
-                Log.d(TAG, "⏰ Alarme programmée (Inexacte/AllowWhileIdle) - Compatible Play Store");
+                Log.d(TAG, "⏰ Alarme set (Inexacte/AllowWhileIdle) - Compatibility with Play Store");
             } else {
                 am.set(AlarmManager.RTC_WAKEUP, triggerAt, pi);
             }
@@ -148,7 +148,7 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
     }
 
     private void stopTrackingService(Context context) {
-        Log.d(TAG, "🛑 Arrêt du service GPS...");
+        Log.d(TAG, "🛑 Stop GPS Service...");
         Context safeContext = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) 
             ? context.createDeviceProtectedStorageContext() : context;
         updateDrivingState(safeContext, false);
@@ -157,7 +157,7 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
         context.stopService(serviceIntent);
         
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        nm.cancel(1); // On force la suppression de la notification
+        nm.cancel(1); // Force notification suppression
     }
 
     private boolean isServiceRunning(Context context) {

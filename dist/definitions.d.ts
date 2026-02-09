@@ -40,6 +40,14 @@ export interface ActivityRecognitionPlugin {
     purgeLocationsBefore(options: {
         timestamp: number;
     }): Promise<void>;
+    /**
+     * Suppress point between two timestamps
+     * @param options { from: number, to:number} - in millisecondes
+     */
+    purgeLocationsBetween(options: {
+        from: number;
+        to: number;
+    }): Promise<void>;
     addListener(eventName: 'activityChange', listenerFunc: (event: ActivityEvent) => void): Promise<PluginListenerHandle>;
     /**
      * live GPS position (if app foreground)

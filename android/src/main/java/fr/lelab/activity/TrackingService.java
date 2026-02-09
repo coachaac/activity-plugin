@@ -38,26 +38,26 @@ public class TrackingService extends Service {
         SharedPreferences prefs = getSafeContext().getSharedPreferences("CapacitorStorage", MODE_PRIVATE);
         boolean wasDriving = prefs.getBoolean("driving_state", false);
 
-        // Si le système relance le service (intent null) mais que l'état n'était pas "conduite"
+        // System re-launch service (intent null) but state was not  "automotive"
         if (intent == null && !wasDriving) {
-            Log.d("TrackingService", "⚠️ Relance système hors conduite, arrêt.");
+            Log.d("TrackingService", "⚠️ Relaunch system outside automotive, Stop.");
             stopSelf();
             return START_NOT_STICKY;
         }
 
-        Log.d("TrackingService", "⚡ Service démarré ou restauré. Conduite: " + wasDriving);
+        Log.d("TrackingService", "⚡ Service strated or restarted: automotive: " + wasDriving);
         
         createNotificationChannel();
         Notification notification = createNotification();
 
-        // Android 14 impose de spécifier le type FOREGROUND_SERVICE_TYPE_LOCATION
+        // Android 14+ need type FOREGROUND_SERVICE_TYPE_LOCATION
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
         } else {
             startForeground(NOTIFICATION_ID, notification);
         }
 
-        // On ne relance pas les updates si elles tournent déjà
+        // Do not relaunch update if already launched
         if (locationPendingIntent == null) {
             startLocationUpdates();
         }
@@ -78,16 +78,17 @@ public class TrackingService extends Service {
     }
 
     private void startLocationUpdates() {
-        // Configuration optimisée pour la conduite
-        LocationRequest locationRequest = new LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000)
-                .setMinUpdateIntervalMillis(2000)
-                .setMinUpdateDistanceMeters(5) // On descend à 5m pour plus de précision en ville
+        // optimised for automotive use case
+        LocationRequest locationRequest = new LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
+                .setIntervalMillis(1000) // best effor 1 point by second
+                .setMinUpdateIntervalMillis(1000)
+                .setMinUpdateDistanceMeters(5) // 5 meters more precision in Town
                 .setWaitForAccurateLocation(true)
                 .build();
 
         Intent intent = new Intent(this, LocationReceiver.class);
         
-        // FLAG_MUTABLE est impératif pour que le système injecte la position
+        // FLAG_MUTABLE mandatory for th essystem to inject position
         int pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             pendingFlags |= PendingIntent.FLAG_MUTABLE;
@@ -99,13 +100,13 @@ public class TrackingService extends Service {
             fusedLocationClient.requestLocationUpdates(locationRequest, locationPendingIntent);
             Log.d("TrackingService", "✅ GPS Updates requested via PendingIntent");
         } catch (SecurityException e) {
-            Log.e("TrackingService", "❌ Permission refusée pour le GPS : " + e.getMessage());
+            Log.e("TrackingService", "❌ Permission denied for GPS : " + e.getMessage());
         }
     }
 
     @Override
     public void onDestroy() {
-        Log.d("TrackingService", "🛑 Arrêt du service");
+        Log.d("TrackingService", "🛑 Stop service");
         
         if (locationPendingIntent != null) {
             fusedLocationClient.removeLocationUpdates(locationPendingIntent)
@@ -127,7 +128,7 @@ public class TrackingService extends Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID, 
-                "Suivi de trajet", 
+                "Suivi de trajet", // improvement TBD should be given on start by App
                 NotificationManager.IMPORTANCE_LOW
             );
             channel.setShowBadge(false);
