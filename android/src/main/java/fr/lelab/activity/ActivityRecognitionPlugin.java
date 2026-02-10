@@ -205,7 +205,7 @@ public class ActivityRecognitionPlugin extends Plugin {
             }
 
             // create sharing zone accessible outside plugin
-            File tempFile = new File(getContext().getCacheDir(), "trajet_export.json");
+            File tempFile = new File(getContext().getCacheDir(), "stored_locations.json");
         
             // copy file
             java.nio.file.Files.copy(

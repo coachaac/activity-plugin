@@ -36,13 +36,13 @@ public class ActivityRecognition {
 
     // --- GPS Management ---
     public void startGPSUpdates() {
-        Log.d(TAG, "🚗 Try to start Tracking Service");
+        Log.d(TAG, "🚗 switch to GPS Tracking Service");
         saveState("driving_state", true);
 
         Intent intent = new Intent(context, TrackingService.class);
-        intent.setAction(TrackingService.ACTION_START_TRACKING);
-        
-        // On lance le Service qui, lui, gère le GPS de manière persistante
+        intent.setAction(TrackingService.ACTION_UPDATE_NOTIF);
+        intent.putExtra(TrackingService.EXTRA_STATE, TrackingService.STATE_GPS_TRACKING); 
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             context.startForegroundService(intent);
         } else {
@@ -51,17 +51,34 @@ public class ActivityRecognition {
     }
 
     public void stopGPSUpdates() {
-        Log.d(TAG, "🔋 Stop activity automotive");
+        Log.d(TAG, "🔋 Stop activity automotive return to activityonly");
         saveState("driving_state", false);
         
         Intent intent = new Intent(context, TrackingService.class);
-        context.stopService(intent);
+        intent.setAction(TrackingService.ACTION_UPDATE_NOTIF);
+        intent.putExtra(TrackingService.EXTRA_STATE, TrackingService.STATE_ACTIVITY_ONLY);
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent);
+        } else {
+            context.startService(intent);
+        }
     }
 
     // --- Activity Management ---
     public void startTracking() {
         Log.d(TAG, "📡 Start Activity Recognition");
         saveState("tracking_active", true);
+
+        Intent intent = new Intent(context, TrackingService.class);
+        saveState("driving_state", false); 
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent);
+        } else {
+            context.startService(intent);
+        }
+
         setupActivityTransitions();
     }
 
@@ -100,12 +117,19 @@ public class ActivityRecognition {
     }
 
     public void stopTracking() {
+        Log.d(TAG, "🛑 Stop Global Activity Tracking");
         saveState("tracking_active", false);
-        stopGPSUpdates();
+        saveState("driving_state", false); 
+
+        // 1. Stop transition sensor
         if (activityClient != null && activityPendingIntent != null) {
             activityClient.removeActivityTransitionUpdates(activityPendingIntent);
             activityClient.removeActivityUpdates(activityPendingIntent);
         }
+
+        // 2. kill foreground service (and so notification)
+        Intent intent = new Intent(context, TrackingService.class);
+        context.stopService(intent);
     }
 
     private PendingIntent createPendingIntent(Intent intent) {

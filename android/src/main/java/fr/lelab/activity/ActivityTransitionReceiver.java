@@ -33,7 +33,7 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
         // --- 1. ALARM Management (STOP GRACE PERIOD) ---
         if (ACTION_STOP_GPS_GRACE.equals(action)) {
             Log.d(TAG, "⏱ AlarmManager : end of grace delay, close service.");
-            stopTrackingService(context);
+            switchToIdleMode(context);
             return;
         }
 
@@ -53,6 +53,28 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
                 handleTransition(context, event.getActivityType(), event.getTransitionType());
             }
         }
+    }
+
+    private void switchToIdleMode(Context context) {
+        Log.d(TAG, "🔋 Switching GPS Service to IDLE mode...");
+        
+        // 1. update state for reboot
+        Context safeContext = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) 
+            ? context.createDeviceProtectedStorageContext() : context;
+        updateDrivingState(safeContext, false);
+
+        // 2. send ACTION_UPDATE_NOTIF not stopService
+        Intent serviceIntent = new Intent(context, TrackingService.class);
+        serviceIntent.setAction(TrackingService.ACTION_UPDATE_NOTIF);
+        serviceIntent.putExtra(TrackingService.EXTRA_STATE, TrackingService.STATE_ACTIVITY_ONLY);
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(serviceIntent);
+        } else {
+            context.startService(serviceIntent);
+        }
+        
+        // no more nm.cancel(1) to keep notif !
     }
 
     private void handleTransition(Context context, int activityType, int transitionType) {

@@ -42,6 +42,12 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
                 startHighPrecisionGPS()
             }
         }
+
+        // if app relaunched after location event
+        if let _ = UserDefaults.standard.object(forKey: kIsTrackingActive) as? Bool {
+            // App is launched by iOS in background if killed even if monitoring was activated
+            locationManager.startMonitoringSignificantLocationChanges()
+        }
     }
 
     // MARK: - Helper Date
@@ -85,12 +91,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
     private func handleActivityUpdate(_ activity: CMMotionActivity) {
 
-        // do not take into account low confidence activity detection
-        /*if activity.confidence == .low {
-            return
-        }*/
-
         let currentType = getActivityName(activity)
+
+        // Security Check: if GPS speed says moving, "stationary" is ignored
+        let isPhysicallyMoving = (locationManager.location?.speed ?? 0) > 5.0 // > 18 km/h
 
         // do not record if same activity as prévious one
         if currentType == lastSavedActivityType {
@@ -100,7 +104,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         // register activity for next round
         self.lastSavedActivityType = currentType
 
-        if activity.automotive {
+        if (activity.automotive || isPhysicallyMoving) {
             // On rafraîchit le timestamp dès qu'on est en voiture
             lastAutomotiveDate = Date()
             
@@ -173,9 +177,9 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         if status == .authorizedAlways || status == .authorizedWhenInUse {
             DispatchQueue.main.async {
                 self.locationManager.desiredAccuracy = kCLLocationAccuracyBest
-                self.locationManager.distanceFilter = 10 // no location update if move is less than 10m
+                self.locationManager.distanceFilter = 5 // no location update if move is less than 5m
                 self.locationManager.allowsBackgroundLocationUpdates = true
-
+                self.locationManager.activityType = .automotiveNavigation
                 self.locationManager.pausesLocationUpdatesAutomatically = false
 
                 if #available(iOS 11.0, *) {
@@ -370,7 +374,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             }
         } else {
             // Sinon, on crée le fichier avec le premier point
-            try? dataToAppend.write(to: url, options: .atomic)
+            try? dataToAppend.write(to: url, options: .noFileProtection)
         }
     }
 
@@ -409,7 +413,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             "activity": type,
             "transition": "ENTER",
             "date": getFormattedDate(),
-            "timestamp": Date().timeIntervalSince1970*1000
+            "timestamp": Int64(Date().timeIntervalSince1970 * 1000)
         ]
     }
 
