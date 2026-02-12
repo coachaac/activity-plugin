@@ -18,6 +18,12 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     private var debugMode = false
 
     private var lastSavedActivityType: String? = nil
+    private var lastActivityForExit: String? = nil
+    private var lastDebouncedType: String? = nil
+    private var lastActivityChangeTime: Date = Date()
+    private var lastLoggedActivities: [String: Date] = [:]
+
+    private let activityLock = NSLock()
 
     // Clés pour le stockage
     private let kIsTrackingActive = "tracking_active"
@@ -33,10 +39,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         let wasDriving = UserDefaults.standard.bool(forKey: kIsDrivingState)
 
         if wasTracking {
-            print("🔄 Réactivation suite à redémarrage système/swipe")
+            print("🔄 Re-activate following phone restart ort App swipe")
             startActivityDetection()
             
-            // Si on était en train de rouler, on relance le GPS haute précision direct
+            // if was running restore highPrecision GPS
             if wasDriving {
                 self.isDriving = true
                 startHighPrecisionGPS()
@@ -50,32 +56,25 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
     }
 
-    // MARK: - Helper Date
+    // Helper Date
     private func getFormattedDate() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return formatter.string(from: Date())
     }
 
-    // MARK: - Logic Centralisée
+    // CEntraliseed Logic 
     private func startActivityDetection() {
         guard CMMotionActivityManager.isActivityAvailable() else { return }
         
         activityManager.startActivityUpdates(to: .main) { [weak self] (activity) in
             guard let self = self, let activity = activity else { return }
             
-            let previousActivity = self.lastSavedActivityType
+            // Tout se passe à l'intérieur de handleActivityUpdate maintenant.
+            // On ne fait plus de notification ou d'écriture ici !
             self.handleActivityUpdate(activity)
-            
-            if self.lastSavedActivityType != previousActivity {
-                let data = self.formatActivityData(activity)
-
-                self.saveLocationToJSON(point: data)
-
-                self.notifyListeners("activityChange", data: data)
-            }
-        } 
-    }  
+        }
+    }
 
     private func triggerVibration(double: Bool) {
         // Vibration système (fonctionne en background et téléphone verrouillé)
@@ -90,69 +89,99 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     }
 
     private func handleActivityUpdate(_ activity: CMMotionActivity) {
+        activityLock.lock()
+        defer { activityLock.unlock() }
 
         let currentType = getActivityName(activity)
+        let now = Date()
+        
+        // 1. Duplicate management
+        if currentType == self.lastSavedActivityType { return }
 
-        // Security Check: if GPS speed says moving, "stationary" is ignored
-        let isPhysicallyMoving = (locationManager.location?.speed ?? 0) > 5.0 // > 18 km/h
-
-        // do not record if same activity as prévious one
-        if currentType == lastSavedActivityType {
-            return 
+        // 2. "STICKY" LOGIC while driving
+        // if currently driving and receive stationary, save event but keep on Driving mode
+        if self.isDriving && currentType == "stationary" {
+            print("⏳ Red light or small stop : stationary saved, GPS remains.")
+            // save stationary ENTER but keep isDriving
+            let data = formatActivityData(type: "stationary", transition: "ENTER")
+            saveLocationToJSON(point: data)
+            self.notifyListeners("activityChange", data: data)
+            
+            self.lastSavedActivityType = currentType
+            return
         }
 
-        // register activity for next round
-        self.lastSavedActivityType = currentType
-
-        if (activity.automotive || isPhysicallyMoving) {
-            // On rafraîchit le timestamp dès qu'on est en voiture
-            lastAutomotiveDate = Date()
+        // 3. Activity detection toi activate driving
+        let isMovingFast = (locationManager.location?.speed ?? 0) > 5.0
+        if activity.automotive || isMovingFast {
+            self.lastAutomotiveDate = now
             
+            if self.isDriving && self.lastSavedActivityType == "stationary" {
+                let exitData = formatActivityData(type: "stationary", transition: "EXIT")
+                saveLocationToJSON(point: exitData)
+                self.notifyListeners("activityChange", data: exitData)
+                // ENTER automotive manage in the following
+            }
+
             if !self.isDriving {
                 print("🚗 Automotive START")
                 self.isDriving = true
                 UserDefaults.standard.set(true, forKey: kIsDrivingState)
-                self.startHighPrecisionGPS()
-                if let lastKnownLocation = self.locationManager.location {
-                    // On passe le point actuel dans un tableau pour le traitement
-                    self.processRembobinage(locations: [lastKnownLocation], startDate: activity.startDate)
-                }
-                if debugMode { self.triggerVibration(double: true) }
-            }
-        } else if activity.walking || activity.stationary || activity.cycling {
-            // On ne fait rien ici ! C'est le locationManager qui gérera le timeout
-            // Cela évite de lancer un Timer qui sera tué par iOS.
-            if self.isDriving {
-                print("🚶 Transition détectée : Le GPS surveille maintenant le timeout de 3min")
+                startHighPrecisionGPS()
             }
         }
+
+        // 4. TRANSITION  (EXIT OLD / ENTER NEW)
+        let oldType = self.lastSavedActivityType
+        self.lastSavedActivityType = currentType
+
+        if let old = oldType {
+            let exitData = formatActivityData(type: old, transition: "EXIT")
+            saveLocationToJSON(point: exitData)
+            self.notifyListeners("activityChange", data: exitData)
+        }
+
+        let enterData = formatActivityData(type: currentType, transition: "ENTER")
+        saveLocationToJSON(point: enterData)
+        self.notifyListeners("activityChange", data: enterData)
+    }
+
+    // --- 3. Format entry ---
+    private func formatActivityData(type: String, transition: String) -> [String: Any] {
+        return [
+            "type": "activity",
+            "activity": type,
+            "transition": transition,
+            "date": getFormattedDate(),
+            "timestamp": Int64(Date().timeIntervalSince1970 * 1000)
+        ]
     }
 
     
     private func processRembobinage(locations: [CLLocation], startDate: Date) {
-        print("⏪ Tentative de récupération de points depuis : \(startDate)")
+        print("⏪ try to get position before : \(startDate)")
         
         for location in locations {
-            // On ne garde le point que s'il a été capturé APRÈS le début réel 
-            // de l'activité physique (startDate) et s'il est assez précis.
-            if location.timestamp >= startDate && location.horizontalAccuracy <= 100 {
+            // keep only point with timestamp after real activity start and precision ok 
+            if location.timestamp >= startDate && location.horizontalAccuracy <= 20 {
                 
                 let backfillPoint: [String: Any] = [
+                    "type": "location",
                     "lat": location.coordinate.latitude,
                     "lng": location.coordinate.longitude,
                     "speed": location.speed,
-                    "date": getFormattedDateFrom(location.timestamp), // Utilise la date du point, pas "maintenant"
+                    "date": getFormattedDateFrom(location.timestamp),
                     "timestamp": location.timestamp.timeIntervalSince1970 * 1000,
-                    "isBackfill": true // Flag utile pour ton JS
+                    "isBackfill": true 
                 ]
                 
-                print("📍 Point de rembobinage enregistré (\(location.timestamp))")
+                print("📍 save restored point (\(location.timestamp))")
                 saveLocationToJSON(point: backfillPoint)
             }
         }
     }
 
-    // MARK: - Helpers Date améliorés
+    // MARK: - Helpers Date 
     private func getFormattedDateFrom(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
@@ -192,23 +221,22 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
     private func stopHighPrecisionGPS() {
         DispatchQueue.main.async {
-            // Arrêt complet du moteur de localisation pour économiser la batterie
+            // battery saving stop location engine
             self.locationManager.stopUpdatingLocation()
             
             if #available(iOS 11.0, *) {
                 self.locationManager.showsBackgroundLocationIndicator = false
             }
-            print("🔋 GPS Haute précision arrêté")
+            print("🔋 High Precision GPS stop")
         }
     }
 
-    // MARK: - Plugin Methods (Interface JS)
+    // MARK: - Plugin Methods (JS Interfaces)
     @objc public func startTracking(_ call: CAPPluginCall) {
         UserDefaults.standard.set(true, forKey: kIsTrackingActive)
         self.debugMode = call.getBool("debug") ?? false
 
         startActivityDetection()
-        // Surveillance discrète pour le réveil auto
         locationManager.startMonitoringSignificantLocationChanges()
         call.resolve()
     }
@@ -217,18 +245,18 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         UserDefaults.standard.set(false, forKey: kIsTrackingActive)
         UserDefaults.standard.set(false, forKey: kIsDrivingState)
 
-        // On nettoie l'état local
+        // reset state
         lastAutomotiveDate = nil 
         self.isDriving = false
         
-        // On arrête les moteurs
+        // Stop engines
         activityManager.stopActivityUpdates()
         locationManager.stopUpdatingLocation()
         locationManager.stopMonitoringSignificantLocationChanges()
         
         locationManager.allowsBackgroundLocationUpdates = false
         
-        print("🛑 Tracking totalement arrêté")
+        print("🛑 All Trackings stopped")
         call.resolve()
     }
 
@@ -271,8 +299,6 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         case .authorizedAlways:
             locationResult = "granted"
         case .authorizedWhenInUse:
-            // Pour ton app, "Always" est préférable, mais on peut considérer "WhenInUse" 
-            // comme accordé pour le tracking immédiat.
             locationResult = "authorizedWhenInUse" 
         case .denied, .restricted:
             locationResult = "denied"
@@ -290,11 +316,11 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     }
 
     @objc public override func requestPermissions(_ call: CAPPluginCall) {
-        // 1. Demande pour le mouvement (CoreMotion)
-        // CoreMotion n'a pas de méthode "request" explicite, 
-        // l'alerte s'affiche automatiquement au premier 'startActivityUpdates'
+        // 1. CoreMotion
+        // CoreMotion no request method, 
+        // Automatic alert on first request 'startActivityUpdates'
         
-        // 2. Demande pour la localisation
+        // 2. Ask for location
         DispatchQueue.main.async {
             let status: CLAuthorizationStatus
             if #available(iOS 14.0, *) {
@@ -304,76 +330,107 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             }
 
             if status == .notDetermined {
-                // Première demande : on demande "Toujours"
-                // Note: iOS affichera d'abord une alerte "Pendant l'utilisation"
+                // First request, ask  "Always"
+                // Note: iOS display first "during use"
                 self.locationManager.requestAlwaysAuthorization()
             } else if status == .authorizedWhenInUse {
-                // Si déjà autorisé "Pendant", on tente de promouvoir vers "Toujours"
+                // if currently "during use", request "Always"
                 self.locationManager.requestAlwaysAuthorization()
             }
             
-            // On répond à Capacitor que la demande est lancée
+            // answer to capacitor that Request done
             call.resolve(["location": "requested"])
         }
     }
 
-    // MARK: - Delegate Location
     public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
 
-        // 1. Vérification du délai de grâce (si on ne détecte plus "automotive")
-        if let lastAuto = lastAutomotiveDate {
-            let timeSinceLastAuto = Date().timeIntervalSince(lastAuto)
-            
-            if timeSinceLastAuto > stopDelay && self.isDriving {
-                print("💤 Timeout 3min atteint : Arrêt du mode conduite")
-                self.isDriving = false
-                UserDefaults.standard.set(false, forKey: kIsDrivingState)
-                self.stopHighPrecisionGPS()
-                
-                if debugMode { self.triggerVibration(double: false) }
-                return // On arrête d'enregistrer
+        if location.speed > 2.0 {
+            self.lastAutomotiveDate = Date()
+        }
+        // --- Exit WATCHDOG Logic ---
+        if self.isDriving {
+            if let lastAuto = lastAutomotiveDate {
+                let timeSinceLastAuto = Date().timeIntervalSince(lastAuto)
+                if timeSinceLastAuto > stopDelay {
+                    self.forceStopDriving()
+                    return
+                }
             }
         }
 
-        // 2. Enregistrement normal si on est toujours en mode conduite
-        guard isDriving else { return }
-        if location.horizontalAccuracy > 100 { return }
+        // --- Save Location ---
+        guard isDriving && location.speed >= 0 && location.horizontalAccuracy <= 20 else { return }
 
         let newPoint: [String: Any] = [
-        "lat": location.coordinate.latitude,
-        "lng": location.coordinate.longitude,
-        "speed": location.speed,
-        "date": getFormattedDate(),
-        // AJOUTER * 1000 ICI pour être raccord avec Android et ta purge
-        "timestamp": location.timestamp.timeIntervalSince1970 * 1000
-    ]
+            "type": "location",
+            "lat": location.coordinate.latitude,
+            "lng": location.coordinate.longitude,
+            "speed": location.speed,
+            "date": getFormattedDate(),
+            "timestamp": location.timestamp.timeIntervalSince1970 * 1000
+        ]
         
         saveLocationToJSON(point: newPoint)
         self.notifyListeners("onLocationUpdate", data: newPoint)
     }
 
-    // MARK: - Stockage & JSON
+    // Proicess end
+    private func forceStopDriving() {
+        print("🛑 forceStopDriving : End of trp conirmed (3min Timeout)")
+
+        // 1. Save EXIT automotive in JSON
+        let exitData = formatActivityData(type: "automotive", transition: "EXIT")
+        self.saveLocationToJSON(point: exitData)
+        self.notifyListeners("activityChange", data: exitData)
+
+        // 2. Save ENTER in next state (stationary)
+        let enterData = formatActivityData(type: "stationary", transition: "ENTER")
+        self.saveLocationToJSON(point: enterData)
+        self.notifyListeners("activityChange", data: enterData)
+
+        // 3. reset interna states
+        self.isDriving = false
+        self.lastAutomotiveDate = nil
+        self.lastSavedActivityType = "stationary"
+        self.lastActivityChangeTime = Date()
+
+        // 4. Persist status (recover reboot/swipe)
+        UserDefaults.standard.set(false, forKey: kIsDrivingState)
+
+        // 5. Stop GPS to save battery
+        self.stopHighPrecisionGPS()
+        
+        // 6. User Feedback in debug mode
+        if debugMode { 
+            self.triggerVibration(double: false) 
+        }
+        
+        print("✅ End of driving")
+    }
+
+    // MARK: - Saving & JSON
     private func saveLocationToJSON(point: [String: Any]) {
         let url = getFilePath()
         
-        // On convertit le dictionnaire en Data (une seule ligne JSON)
+        // convert dictionnary to Data (one line JSON)
         guard let jsonData = try? JSONSerialization.data(withJSONObject: point),
               let jsonString = String(data: jsonData, encoding: .utf8) else { return }
         
-        // On ajoute un saut de ligne pour séparer les objets
+        // add EOF to separate trips
         let line = jsonString + "\n"
         guard let dataToAppend = line.data(using: .utf8) else { return }
 
         if FileManager.default.fileExists(atPath: url.path) {
-            // Si le fichier existe, on ouvre un handle pour écrire à la fin
+            // if file exixts open handle to write at the end
             if let fileHandle = try? FileHandle(forWritingTo: url) {
                 fileHandle.seekToEndOfFile()
                 fileHandle.write(dataToAppend)
                 fileHandle.closeFile()
             }
         } else {
-            // Sinon, on crée le fichier avec le premier point
+            // else create and write
             try? dataToAppend.write(to: url, options: .noFileProtection)
         }
     }
@@ -384,7 +441,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             return []
         }
         
-        // On découpe par ligne, on ignore les lignes vides, et on parse chaque ligne en JSON
+        // parsing JSON
         let lines = content.components(separatedBy: .newlines)
         return lines.compactMap { line in
             guard !line.isEmpty,
@@ -401,21 +458,6 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             .appendingPathComponent(fileName)
     }
 
-    private func formatActivityData(_ activity: CMMotionActivity) -> [String: Any] {
-        var type = "stationary"
-        if activity.walking { type = "walking" }
-        else if activity.running { type = "running" }
-        else if activity.cycling { type = "cycling" }
-        else if activity.automotive { type = "automotive" }
-        
-        return [
-            "type": "activity",
-            "activity": type,
-            "transition": "ENTER",
-            "date": getFormattedDate(),
-            "timestamp": Int64(Date().timeIntervalSince1970 * 1000)
-        ]
-    }
 
     @objc func shareSavedLocations(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
@@ -441,7 +483,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
                     }
                 } else {
                     print("❌ file exists but empty")
-                    call.reject("Le fichier de données est vide.")
+                    call.reject("file is empty")
                 }
             } else {
                 print("❌ file not found at path given.")
@@ -460,50 +502,46 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         
         let url = getFilePath()
         
-        // Si le fichier n'existe pas, il n'y a rien à purger
+        // no more file nothing to purge
         guard FileManager.default.fileExists(atPath: url.path) else {
             call.resolve()
             return
         }
         
         do {
-            // 1. Lecture du fichier JSONL
+            // 1. Read JSONL file
             let content = try String(contentsOf: url, encoding: .utf8)
             let lines = content.components(separatedBy: .newlines)
             
-            // 2. Filtrage des lignes
+            // 2. Filter lines
             let filteredLines = lines.filter { line in
-                // On ignore les lignes vides
+                // empty lines ignored
                 if line.trimmingCharacters(in: .whitespaces).isEmpty { return false }
                 
                 guard let data = line.data(using: .utf8),
                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let pointTimestamp = json["timestamp"] as? Double else {
-                    // Si la ligne est corrompue, on ne la garde pas par sécurité
+                    // bad line discarded (security)
                     return false
                 }
                 
-                // On ne garde que les points PLUS RÉCENTS ou ÉGAUX au timestamp fourni
+                // keep more recent or equal timestamp
                 return pointTimestamp >= timestampLimit
             }
             
-            // 3. Reconstruction du contenu (JSONL)
-            // On rejoint les lignes et on s'assure qu'il y a un saut de ligne à la fin s'il y a des données
+            // 3. Rebuild content (JSONL)
             let newContent = filteredLines.joined(separator: "\n") + (filteredLines.isEmpty ? "" : "\n")
             
-            // 4. Écriture atomique pour éviter de corrompre le fichier en cas de crash
+            // 4. atomic writing to prevent file corruption in case of crash
             try newContent.write(to: url, atomically: true, encoding: .utf8)
             
             print("🧹 iOS Purge : \(lines.count - filteredLines.count) points supprimés")
             call.resolve()
             
         } catch {
-            call.reject("Erreur lors de la purge : \(error.localizedDescription)")
+            call.reject("Error during purge : \(error.localizedDescription)")
         }
     }
-
-
-
 
 
 
