@@ -22,7 +22,7 @@ export interface ActivityRecognitionPlugin {
   requestPermissions(): Promise<PermissionStatus>;
   
   // Modifié pour inclure le tracking GPS
-  startTracking(options?: { debug?: boolean }): Promise<void>;
+  startTracking(options?: { debug?: boolean, url?: string, groupId?: string }): Promise<void>;
   stopTracking(): Promise<void>;
   
   // --- NOUVELLES MÉTHODES POUR LE STOCKAGE ---

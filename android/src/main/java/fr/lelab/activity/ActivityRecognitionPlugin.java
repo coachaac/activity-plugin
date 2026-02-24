@@ -48,6 +48,9 @@ public class ActivityRecognitionPlugin extends Plugin {
     private boolean debugMode = false;
     private boolean isDriving = false;
 
+    private static final String TAG = "ActivityRecognitionPlugin";
+
+
     // --- HELPER : Stockage protégé pour le reboot (Direct Boot) ---
     private Context getSafeContext() {
         return (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) 
@@ -152,6 +155,27 @@ public class ActivityRecognitionPlugin extends Plugin {
         }
         this.debugMode = call.getBoolean("debug", false);
         this.isDriving = false;
+
+        String url = call.getString("url");
+        String token = call.getString("groupId");
+
+        if (url == null || token == null) {
+            // no send to server managed
+            url = "";
+            token = "";
+        }
+
+        Log.d(TAG, "🔍 Debug Config - URL: " + (url != null ? url : "MISSING") + " | Token: " + (token != null ? token : "MISSING"));
+
+        // Sauvegarde persistante
+        if (url != null && token != null) {
+            SharedPreferences prefs = getContext().getSharedPreferences("TripPrefs", Context.MODE_PRIVATE);
+            prefs.edit()
+                .putString("server_url", url)
+                .putString("jwt_token", token)
+                .apply();
+            Log.d("SmartPilot", "🌐 Server config saved for background sync");
+        }
 
         // Sauvegarde de l'état "Actif"
         getSafeContext().getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
@@ -277,6 +301,22 @@ public class ActivityRecognitionPlugin extends Plugin {
         return true;
     }
 
+
+    private void triggerUpload() {
+        androidx.work.Constraints constraints = new androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .build();
+
+        androidx.work.OneTimeWorkRequest uploadRequest = new androidx.work.OneTimeWorkRequest.Builder(TripUploadWorker.class)
+                .setConstraints(constraints)
+                .build();
+
+        androidx.work.WorkManager.getInstance(getContext()).enqueue(uploadRequest);
+        Log.d("SmartPilot", "📡 Upload worker enqueued");
+    }
+
+
+    
 
 
 }

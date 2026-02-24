@@ -7,6 +7,9 @@ import AudioToolbox
 
 @objc(ActivityRecognitionPlugin)
 public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
+
+    private var serverUrl: String?
+    private var groupId: String?
     
     private let activityManager = CMMotionActivityManager()
     private let locationManager = CLLocationManager()
@@ -63,15 +66,14 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         return formatter.string(from: Date())
     }
 
-    // CEntraliseed Logic 
+    // Centraliseed Logic 
     private func startActivityDetection() {
         guard CMMotionActivityManager.isActivityAvailable() else { return }
         
         activityManager.startActivityUpdates(to: .main) { [weak self] (activity) in
             guard let self = self, let activity = activity else { return }
             
-            // Tout se passe à l'intérieur de handleActivityUpdate maintenant.
-            // On ne fait plus de notification ou d'écriture ici !
+            // All managed by handleActivityUpdate .
             self.handleActivityUpdate(activity)
         }
     }
@@ -234,7 +236,23 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     // MARK: - Plugin Methods (JS Interfaces)
     @objc public func startTracking(_ call: CAPPluginCall) {
         UserDefaults.standard.set(true, forKey: kIsTrackingActive)
+
+        // get debug parameter
         self.debugMode = call.getBool("debug") ?? false
+
+        // get url parameter
+        let url = call.getString("url");
+        print("🌐 destination url set to : \(url)")
+
+        // get groupId parameter
+        let groupId = call.getString("groupId");
+        print("🌐 groupId set to : \(groupId)")
+
+        UserDefaults.standard.set(url, forKey: "trip_server_url")
+        UserDefaults.standard.set(groupId, forKey: "group_id_token")
+
+        self.serverUrl = url
+        self.groupId = groupId
 
         startActivityDetection()
         locationManager.startMonitoringSignificantLocationChanges()
@@ -344,13 +362,16 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     }
 
     public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        
         guard let location = locations.last else { return }
+
+        // print("📍 Point reçu - Vitesse: \(location.speed), Accuracy: \(location.horizontalAccuracy)")
 
         if location.speed > 2.0 {
             self.lastAutomotiveDate = Date()
         }
         // --- Exit WATCHDOG Logic ---
-        if self.isDriving {
+        else if self.isDriving {
             if let lastAuto = lastAutomotiveDate {
                 let timeSinceLastAuto = Date().timeIntervalSince(lastAuto)
                 if timeSinceLastAuto > stopDelay {
@@ -406,6 +427,8 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         if debugMode { 
             self.triggerVibration(double: false) 
         }
+
+        self.processAndUploadAutomotiveTripsOnly()
         
         print("✅ End of driving")
     }
@@ -542,6 +565,258 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             call.reject("Error during purge : \(error.localizedDescription)")
         }
     }
+
+
+    //
+    // Upload to server
+    //
+    func processAndUploadAutomotiveTripsOnly() {
+        let allEntries = self.getAllStoredLocations()
+        guard !allEntries.isEmpty else { return }
+
+        var currentTrip = [[String: Any]]()
+        var finishedAutomotiveTrips = [[[String: Any]]]()
+        var remainingData = [[String: Any]]()
+        let MOTORIZED_SPEED_THRESHOLD = 2.2 // walking threshold
+
+        for entry in allEntries {
+            currentTrip.append(entry)
+            
+            // On déclenche la fin du segment sur un EXIT automotive
+            if let type = entry["type"] as? String, type == "activity",
+               let transition = entry["transition"] as? String, transition == "EXIT",
+               let activity = entry["activity"] as? String, activity == "automotive" {
+                
+                // --- CLEANING LOGIC ---
+                let cleanedTrip = trimPedestrianStart(trip: currentTrip, speedThreshold: MOTORIZED_SPEED_THRESHOLD)
+                
+                if (isTripSignificant(trip: cleanedTrip)) {
+                    finishedAutomotiveTrips.append(cleanedTrip)
+                    print("✅ automotive trip cleaned (Points: \(cleanedTrip.count))")
+                } else {
+                    print("🚶 walking block, ignored.")
+                }
+                
+                currentTrip = [] 
+            }
+        }
+
+        remainingData = currentTrip
+
+        if finishedAutomotiveTrips.isEmpty {
+            self.saveRemainingDataOnly(remainingData)
+            return
+        }
+
+        self.uploadTripsSequentially(trips: finishedAutomotiveTrips) { allSuccess in
+            if allSuccess {
+                self.saveRemainingDataOnly(remainingData)
+            }
+        }
+    }
+
+    // keep only data of the current trip
+    private func saveRemainingDataOnly(_ data: [[String: Any]]) {
+        let fileURL = getFilePath()
+        
+        // Si data est vide, on peut techniquement juste supprimer le fichier
+        if data.isEmpty {
+            try? FileManager.default.removeItem(at: fileURL)
+            print("🗑️ Fichier vidé car aucun reliquat.")
+            return
+        }
+
+        do {
+            let jsonData = try JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted])
+            // .atomic file witten in temporary file then rename ti prevent corrupted file in case of crash 
+            try jsonData.write(to: fileURL, options: .atomic)
+            print("💾 local file updated : \(data.count) points kept.")
+        } catch {
+            print("❌ Error during writing remaining data : \(error)")
+        }
+    }
+
+
+    private func trimPedestrianStart(trip: [[String: Any]], speedThreshold: Double) -> [[String: Any]] {
+        var firstMotorizedIndex: Int? = nil
+
+        // 1. Trouver l'index du premier point motorisé
+        for (index, step) in trip.enumerated() {
+            let isAutomotive = (step["activity"] as? String) == "automotive"
+            let speed = step["speed"] as? Double ?? 0.0
+            let isFast = (step["type"] as? String) == "location" && speed > speedThreshold
+
+            if isAutomotive || isFast {
+                firstMotorizedIndex = index
+                break
+            }
+        }
+
+        // 2. Si trouvé, on garde tout à partir de cet index (ou un point avant pour le contexte)
+        if let startIndex = firstMotorizedIndex {
+            let actualStart = max(0, startIndex - 1)
+            return Array(trip[actualStart..<trip.count])
+        }
+
+        return [] // Retourne vide si aucune activité moteur n'est trouvée
+    }
+
+    private func isTripSignificant(trip: [[String: Any]]) -> Bool {
+        guard trip.count >= 2 else { return false }
+
+        var totalDistance: Double = 0
+        var lastLocation: CLLocation?
+
+        // 1. Distance
+        for step in trip {
+            guard let type = step["type"] as? String, type == "location",
+                  let lat = step["lat"] as? Double,
+                  let lng = step["lng"] as? Double else { continue }
+            
+            let currentLocation = CLLocation(latitude: lat, longitude: lng)
+            
+            if let previous = lastLocation {
+                totalDistance += currentLocation.distance(from: previous)
+            }
+            lastLocation = currentLocation
+        }
+
+        // 2. Duration
+        let startTime = trip.first?["timestamp"] as? Double ?? 0
+        let endTime = trip.last?["timestamp"] as? Double ?? 0
+        let durationSeconds = (endTime - startTime) / 1000
+
+        print("🛣️ Trajet réel: \(Int(totalDistance))m, Durée: \(Int(durationSeconds))s")
+
+        //  > 1000m  and > 60s
+        return (totalDistance > 1000 && durationSeconds > 60);
+    }
+
+    private func uploadTripsSequentially(trips: [[[String: Any]]], completion: @escaping (Bool) -> Void) {
+        var remainingTrips = trips
+        
+        guard let nextTrip = remainingTrips.first else {
+            // Plus rien à envoyer, on a réussi tous les envois de la liste
+            completion(true)
+            return
+        }
+
+        self.uploadTripToServer(points: nextTrip) { success in
+            if success {
+                print("✅ Un trajet a été envoyé.")
+                remainingTrips.removeFirst()
+                // Appel récursif pour le suivant
+                self.uploadTripsSequentially(trips: remainingTrips, completion: completion)
+            } else {
+                print("❌ Échec de l'envoi d'un trajet. On arrête pour préserver les données.")
+                completion(false)
+            }
+        }
+    }
+
+    func uploadTripToServer(points: [[String: Any]], completion: @escaping (Bool) -> Void) {
+    
+        // 1. Récupération des credentials (mémoire ou UserDefaults)
+        let token = self.groupId ?? UserDefaults.standard.string(forKey: "group_id_token")
+        let urlString = self.serverUrl ?? UserDefaults.standard.string(forKey: "trip_server_url")
+
+        guard let urlStr = urlString, let url = URL(string: urlStr), let jwt = token else {
+            print("❌ Impossible d'envoyer : Token ou URL introuvable.")
+            completion(false)
+            return
+        }
+
+        // 2. Préparation du payload {"measures": [...]}
+        // On ne garde que les points GPS, on ignore les événements d'activité
+        let measures = points.compactMap { (dict) -> [String: Any]? in
+            guard let type = dict["type"] as? String, type == "location" else { return nil }
+            return [
+                "lat": dict["lat"] ?? 0.0,
+                "lng": dict["lng"] ?? 0.0,
+                "speed": dict["speed"] ?? 0.0,
+                "timestamp": dict["timestamp"] ?? 0
+            ]
+        }
+
+        // Si après filtrage le trajet est vide, on considère l'envoi "réussi" pour purger le fichier
+        if measures.isEmpty {
+            print("ℹ️ Aucun point GPS trouvé dans ce segment (uniquement activité). Envoi ignoré.")
+            completion(true)
+            return
+        }
+
+        // Structure finale identique à Android
+        let payload: [String: Any] = ["measures": measures]
+
+        // 3. Sérialisation JSON et Log limité pour Xcode
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: payload, options: []) else {
+            print("❌ Erreur de sérialisation JSON")
+            completion(false)
+            return
+        }
+
+        let jsonString = String(data: jsonData, encoding: .utf8) ?? ""
+        if jsonString.count > 500 {
+            let start = String(jsonString.prefix(250))
+            let end = String(jsonString.suffix(100))
+            print("📤 iOS JSON (Large - \(jsonString.count) chars): \(start) ... [TRUNCATED] ... \(end)")
+        } else {
+            print("📤 iOS JSON: \(jsonString)")
+        }
+
+        // 4. Configuration de la requête HTTP
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
+        request.httpBody = jsonData
+        request.timeoutInterval = 30 // Sécurité réseau
+
+        // 5. Exécution de l'envoi
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("❌ Erreur réseau iOS : \(error.localizedDescription)")
+                completion(false)
+                return
+            }
+
+            if let httpResponse = response as? HTTPURLResponse {
+                print("📡 iOS Response Code: \(httpResponse.statusCode)")
+                completion((200...299).contains(httpResponse.statusCode))
+            } else {
+                completion(false)
+            }
+        }
+        task.resume()
+    }
+
+    private func getAllStoredLocations() -> [[String: Any]] {
+        let fileURL = getFilePath() // Utilise ta méthode existante getFilePath()
+        var locations: [[String: Any]] = []
+        
+        // On tente de lire le contenu du fichier
+        guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else {
+            return []
+        }
+        
+        // On découpe par ligne (format JSONL)
+        let lines = content.components(separatedBy: .newlines)
+        for line in lines where !line.isEmpty {
+            if let data = line.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                locations.append(json)
+            }
+        }
+        return locations
+    }
+
+
+    private func clearLocalJSON() {
+        let url = getFilePath()
+        try? FileManager.default.removeItem(at: url)
+        print("🗑️ Local JSON file cleared after successful upload.")
+    }
+
 
 
 

@@ -17,7 +17,7 @@ export class ActivityRecognitionWeb extends WebPlugin implements ActivityRecogni
     };
   }
 
-  async startTracking(_options?: { debug?: boolean }): Promise<void> {
+  async startTracking(_options?: { debug?: boolean, url?: string, groupId?: string }): Promise<void> {
     console.log('Tracking started on web');
   }
 

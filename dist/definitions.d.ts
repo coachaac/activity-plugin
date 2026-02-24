@@ -17,6 +17,9 @@ export interface ActivityRecognitionPlugin {
     requestPermissions(): Promise<PermissionStatus>;
     startTracking(options?: {
         debug?: boolean;
+        url?: string;
+        groupId?: string;
+        apiKey?: string;
     }): Promise<void>;
     stopTracking(): Promise<void>;
     /**

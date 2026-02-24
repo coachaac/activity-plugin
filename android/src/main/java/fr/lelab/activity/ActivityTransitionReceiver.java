@@ -17,6 +17,11 @@ import com.google.android.gms.location.ActivityTransitionEvent;
 import com.google.android.gms.location.ActivityTransitionResult;
 import com.google.android.gms.location.DetectedActivity;
 
+import androidx.work.Constraints;
+import androidx.work.NetworkType;
+import androidx.work.OneTimeWorkRequest;
+import androidx.work.WorkManager;
+
 public class ActivityTransitionReceiver extends BroadcastReceiver {
     private static final String TAG = "ActivityReceiver";
     public static final String ACTION_STOP_GPS_GRACE = "fr.lelab.activity.ACTION_STOP_GPS_GRACE";
@@ -62,6 +67,9 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
         Context safeContext = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) 
             ? context.createDeviceProtectedStorageContext() : context;
         updateDrivingState(safeContext, false);
+
+        // try to launch sync to server
+        triggerUploadWorker(context);
 
         // 2. send ACTION_UPDATE_NOTIF not stopService
         Intent serviceIntent = new Intent(context, TrackingService.class);
@@ -201,4 +209,29 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
             default: return "UNKNOWN_" + activityType;
         }
     }
+
+
+    private void triggerUploadWorker(Context context) {
+        try {
+            // On définit la contrainte : avoir une connexion internet
+            Constraints constraints = new Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build();
+
+            // Création de la requête pour le Worker que tu as déjà créé
+            OneTimeWorkRequest uploadRequest = new OneTimeWorkRequest.Builder(TripUploadWorker.class)
+                    .setConstraints(constraints)
+                    .addTag("TRIP_UPLOAD_TASK")
+                    .build();
+
+            // Envoi dans la file d'attente du système
+            WorkManager.getInstance(context).enqueue(uploadRequest);
+            Log.d(TAG, "📡 WorkManager : Trajet terminé et stabilisé. Envoi planifié.");
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Erreur lors de la planification du Worker : " + e.getMessage());
+        }
+    }
+
+
+
 }

@@ -5,6 +5,9 @@ export declare class ActivityRecognitionWeb extends WebPlugin implements Activit
     requestPermissions(): Promise<PermissionStatus>;
     startTracking(_options?: {
         debug?: boolean;
+        url?: string;
+        groupId?: string;
+        apiKey?: string;
     }): Promise<void>;
     stopTracking(): Promise<void>;
     getSavedLocations(): Promise<{
