@@ -24,8 +24,11 @@ export interface ActivityRecognitionPlugin {
   // Modifié pour inclure le tracking GPS
   startTracking(options?: { debug?: boolean, url?: string, groupId?: string }): Promise<void>;
   stopTracking(): Promise<void>;
+
+  forceUpload(): Promise<{ status: string }>;
   
-  // --- NOUVELLES MÉTHODES POUR LE STOCKAGE ---
+
+  // --- DEBUG Method ---
   
   /**
    * get  GPS position

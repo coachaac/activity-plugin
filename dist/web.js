@@ -18,6 +18,10 @@ export class ActivityRecognitionWeb extends WebPlugin {
     async stopTracking() {
         console.log('Tracking stopped on web');
     }
+    async forceUpload() {
+        console.log('Tracking stopped on web');
+        return { status: "not managed on web" };
+    }
     async getSavedLocations() {
         return { locations: [] };
     }

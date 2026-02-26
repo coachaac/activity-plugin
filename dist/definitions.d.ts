@@ -19,9 +19,11 @@ export interface ActivityRecognitionPlugin {
         debug?: boolean;
         url?: string;
         groupId?: string;
-        apiKey?: string;
     }): Promise<void>;
     stopTracking(): Promise<void>;
+    forceUpload(): Promise<{
+        status: string;
+    }>;
     /**
      * get  GPS position
      */

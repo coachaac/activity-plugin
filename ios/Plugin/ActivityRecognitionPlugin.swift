@@ -567,6 +567,20 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     }
 
 
+
+    //
+    // Upload to server from js
+    //
+    @objc public func forceUpload(_ call: CAPPluginCall) {
+        print("📲 Force upload triggered from JS")
+                self.processAndUploadAutomotiveTripsOnly()
+        
+        // answer to js
+        call.resolve([
+            "status": "upload_initiated"
+        ])
+    }
+
     //
     // Upload to server
     //

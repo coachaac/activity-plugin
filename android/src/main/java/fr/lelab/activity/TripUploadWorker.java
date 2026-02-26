@@ -22,7 +22,7 @@ public class TripUploadWorker extends Worker {
         Context context = getApplicationContext();
         Log.d(TAG, "🚀 WorkManager START");
 
-        // Test de lecture des SharedPreferences (Vérifie bien le nom "TripPrefs" ou "CapacitorStorage")
+        // Get SharedPreferences 
         SharedPreferences prefs = context.getSharedPreferences("TripPrefs", Context.MODE_PRIVATE);
         String url = prefs.getString("server_url", null);
         String token = prefs.getString("jwt_token", null);

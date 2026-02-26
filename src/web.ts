@@ -25,6 +25,12 @@ export class ActivityRecognitionWeb extends WebPlugin implements ActivityRecogni
     console.log('Tracking stopped on web');
   }
 
+  async forceUpload(): Promise<{ status: string }>{
+    console.log('Tracking stopped on web');
+    return {status: "not managed on web"}
+  }
+  
+
   async getSavedLocations(): Promise<{ locations: GpsLocation[] }> {
     return { locations: [] };
   }

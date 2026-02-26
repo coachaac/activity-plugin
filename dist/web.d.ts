@@ -7,9 +7,11 @@ export declare class ActivityRecognitionWeb extends WebPlugin implements Activit
         debug?: boolean;
         url?: string;
         groupId?: string;
-        apiKey?: string;
     }): Promise<void>;
     stopTracking(): Promise<void>;
+    forceUpload(): Promise<{
+        status: string;
+    }>;
     getSavedLocations(): Promise<{
         locations: GpsLocation[];
     }>;
