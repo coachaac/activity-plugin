@@ -14,6 +14,7 @@ import android.os.Vibrator;
 import android.os.VibrationEffect;
 import android.os.PowerManager;
 import android.location.LocationManager;
+import android.provider.Settings;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -29,18 +30,23 @@ import com.getcapacitor.PermissionState;
     permissions = {
         @Permission(
             alias = "activity",
+            strings = { Manifest.permission.ACTIVITY_RECOGNITION }
+        ),
+        @Permission(
+            alias = "location", // Alias standard pour la position au premier plan
             strings = { 
-                Manifest.permission.ACTIVITY_RECOGNITION,
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION
+                Manifest.permission.ACCESS_FINE_LOCATION, 
+                Manifest.permission.ACCESS_COARSE_LOCATION 
             }
         ),
         @Permission(
             alias = "backgroundLocation",
-            strings = { "android.permission.ACCESS_BACKGROUND_LOCATION" }
+            strings = { Manifest.permission.ACCESS_BACKGROUND_LOCATION }
         )
     }
 )
+
+
 public class ActivityRecognitionPlugin extends Plugin {
 
     private ActivityRecognition implementation;
@@ -49,7 +55,6 @@ public class ActivityRecognitionPlugin extends Plugin {
     private boolean isDriving = false;
 
     private static final String TAG = "ActivityRecognitionPlugin";
-
 
     // --- HELPER : Stockage protégé pour le reboot (Direct Boot) ---
     private Context getSafeContext() {
@@ -131,24 +136,48 @@ public class ActivityRecognitionPlugin extends Plugin {
     @PluginMethod
     public void checkPermissions(PluginCall call) {
         JSObject ret = new JSObject();
-        
-        // Récupération des états précis
-        String activityState = getPermissionState("activity").toString();
-        String locationState = getPermissionState("backgroundLocation").toString();
-        
-        // On renvoie un objet détaillé
-        ret.put("activity", activityState); // "granted", "denied" or "prompt"
+
+        // On récupère les états de manière sécurisée
+        String activityState = getSafePermissionState("activity");
+        String locationState = getSafePermissionState("location");
+        String bgLocationState = getSafePermissionState("backgroundLocation");
+
+        ret.put("activity", activityState);
         ret.put("location", locationState);
-        
-        // On garde 'granted' pour la compatibilité globale si besoin
-        ret.put("granted", getPermissionState("activity") == com.getcapacitor.PermissionState.GRANTED 
-                && getPermissionState("backgroundLocation") == com.getcapacitor.PermissionState.GRANTED);
-        
+        ret.put("backgroundLocation", bgLocationState);
+
+        // Un flag 'granted' global pour simplifier le JS
+        boolean allOk = "granted".equals(activityState) && 
+                        "granted".equals(locationState) && 
+                        "granted".equals(bgLocationState);
+                        
+        ret.put("granted", allOk);
+
         call.resolve(ret);
+    }
+
+    // Méthode helper pour éviter le NullPointerException
+    private String getSafePermissionState(String alias) {
+        com.getcapacitor.PermissionState state = getPermissionState(alias);
+        if (state == null) {
+            return "prompt"; // default id state not yet known
+        }
+        return state.toString();
     }
 
     @PluginMethod
     public void startTracking(PluginCall call) {
+
+        SharedPreferences trackPrefs = getContext().getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
+        boolean wasTracking = trackPrefs.getBoolean("tracking_active", false);
+
+         if (wasTracking)
+        {
+            // do not relaunch but say ok as already launched
+            call.resolve();
+            return;
+        }
+
         if (!isSystemReady()) {
             call.reject("System not ready. Verify permissions and GPS.");
             return;
@@ -286,6 +315,35 @@ public class ActivityRecognitionPlugin extends Plugin {
             }
         }
 
+
+    @PluginMethod
+        public void forceUpload(PluginCall call) {
+            Context context = getContext();
+            
+            // Get infos from prefs
+            SharedPreferences prefs = context.getSharedPreferences("TripPrefs", Context.MODE_PRIVATE);
+            String url = prefs.getString("server_url", null);
+            String token = prefs.getString("jwt_token", null);
+
+            if (url == null || url.trim().isEmpty() || token == null || token.trim().isEmpty()) {
+                call.reject("Configuration manquante (URL ou Token)");
+                return;
+            }
+
+            try {
+                // On lance le traitement synchrone
+                JsonStorageHelper.processAndUploadAutomotiveTrips(context, url, token);
+                
+                JSObject ret = new JSObject();
+                ret.put("status", "success");
+                call.resolve(ret);
+            } catch (Exception e) {
+                Log.e("ActivityPlugin", "Erreur forceUpload: " + e.getMessage());
+                call.reject("Erreur lors de l'upload: " + e.getMessage());
+            }
+        } 
+        
+
     // --- SYSTEM CHECK (Permissions et Capteurs) ---
     private boolean isSystemReady() {
         Context context = getContext();
@@ -316,7 +374,44 @@ public class ActivityRecognitionPlugin extends Plugin {
     }
 
 
-    
+    @PluginMethod
+        public void checkBatteryOptimization(PluginCall call) {
+            Context context = getContext();
+            String packageName = context.getPackageName();
+            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+            
+            JSObject ret = new JSObject();
+            if (pm != null) {
+                // Return true if app already ignore battery optimisation
+                boolean isIgnoring = pm.isIgnoringBatteryOptimizations(packageName);
+                ret.put("isIgnoring", isIgnoring);
+            } else {
+                ret.put("isIgnoring", true);
+            }
+            call.resolve(ret);
+        }
+
+    @PluginMethod
+        public void requestIgnoreBatteryOptimization(PluginCall call) {
+            Context context = getContext();
+            String packageName = context.getPackageName();
+            
+            Intent intent = new Intent();
+            intent.setAction(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            intent.setData(Uri.parse("package:" + packageName));
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            
+            try {
+                context.startActivity(intent);
+                call.resolve();
+            } catch (Exception e) {
+                // if fail open menu
+                Intent generalIntent = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+                generalIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(generalIntent);
+                call.resolve();
+            }
+        }
 
 
 }

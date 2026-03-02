@@ -2,7 +2,8 @@ import type { PermissionState, PluginListenerHandle } from '@capacitor/core';
 
 export interface PermissionStatus {
   activity: PermissionState;
-  location: PermissionState; // Ajouté pour le GPS
+  location: PermissionState; 
+  backgroundLocation: PermissionState;
 }
 
 export interface ActivityEvent {
@@ -10,7 +11,6 @@ export interface ActivityEvent {
   transition: 'ENTER' | 'EXIT';
 }
 
-// Nouvelle interface pour les points GPS stockés
 export interface GpsLocation {
   lat: number;
   lng: number;
@@ -19,13 +19,15 @@ export interface GpsLocation {
 
 export interface ActivityRecognitionPlugin {
   checkPermissions(): Promise<PermissionStatus>;
-  requestPermissions(): Promise<PermissionStatus>;
-  
-  // Modifié pour inclure le tracking GPS
+  requestPermissions(options?: { permissions: string[] }): Promise<PermissionStatus>;
+
   startTracking(options?: { debug?: boolean, url?: string, groupId?: string }): Promise<void>;
   stopTracking(): Promise<void>;
 
   forceUpload(): Promise<{ status: string }>;
+
+  checkBatteryOptimization(): Promise<{ isIgnoring: boolean }>;
+  requestIgnoreBatteryOptimization(): Promise<void>;
   
 
   // --- DEBUG Method ---

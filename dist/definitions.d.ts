@@ -2,6 +2,7 @@ import type { PermissionState, PluginListenerHandle } from '@capacitor/core';
 export interface PermissionStatus {
     activity: PermissionState;
     location: PermissionState;
+    backgroundLocation: PermissionState;
 }
 export interface ActivityEvent {
     activity: 'walking' | 'running' | 'cycling' | 'automotive' | 'stationary' | 'unknown';
@@ -14,7 +15,9 @@ export interface GpsLocation {
 }
 export interface ActivityRecognitionPlugin {
     checkPermissions(): Promise<PermissionStatus>;
-    requestPermissions(): Promise<PermissionStatus>;
+    requestPermissions(options?: {
+        permissions: string[];
+    }): Promise<PermissionStatus>;
     startTracking(options?: {
         debug?: boolean;
         url?: string;
@@ -24,6 +27,10 @@ export interface ActivityRecognitionPlugin {
     forceUpload(): Promise<{
         status: string;
     }>;
+    checkBatteryOptimization(): Promise<{
+        isIgnoring: boolean;
+    }>;
+    requestIgnoreBatteryOptimization(): Promise<void>;
     /**
      * get  GPS position
      */

@@ -3,14 +3,24 @@ export class ActivityRecognitionWeb extends WebPlugin {
     async checkPermissions() {
         return {
             activity: 'granted',
-            location: 'granted'
+            location: 'granted',
+            backgroundLocation: 'granted'
         };
     }
     async requestPermissions() {
         return {
             activity: 'granted',
-            location: 'granted'
+            location: 'granted',
+            backgroundLocation: 'granted'
         };
+    }
+    async checkBatteryOptimization() {
+        // not available on web simulate "OK"
+        return { isIgnoring: true };
+    }
+    async requestIgnoreBatteryOptimization() {
+        console.warn('Battery optimization check is not available on web');
+        return;
     }
     async startTracking(_options) {
         console.log('Tracking started on web');

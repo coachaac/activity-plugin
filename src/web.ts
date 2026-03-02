@@ -6,15 +6,27 @@ export class ActivityRecognitionWeb extends WebPlugin implements ActivityRecogni
   async checkPermissions(): Promise<PermissionStatus> {
     return { 
       activity: 'granted',
-      location: 'granted' 
+      location: 'granted',
+      backgroundLocation: 'granted'
     };
   }
 
   async requestPermissions(): Promise<PermissionStatus> {
     return { 
       activity: 'granted',
-      location: 'granted' 
+      location: 'granted',
+      backgroundLocation: 'granted'
     };
+  }
+
+  async checkBatteryOptimization(): Promise<{ isIgnoring: boolean }> {
+    // not available on web simulate "OK"
+    return { isIgnoring: true };
+  }
+
+  async requestIgnoreBatteryOptimization(): Promise<void> {
+    console.warn('Battery optimization check is not available on web');
+    return;
   }
 
   async startTracking(_options?: { debug?: boolean, url?: string, groupId?: string }): Promise<void> {

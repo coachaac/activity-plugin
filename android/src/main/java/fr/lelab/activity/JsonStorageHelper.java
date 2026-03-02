@@ -408,6 +408,8 @@ public class JsonStorageHelper {
 
             // 2. Configuration de la connexion
             URL url = new URL(urlStr);
+            Log.i(TAG, "ℹ️ url: " + urlStr);
+            
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
             // Ajout explicite du charset dans le header

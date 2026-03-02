@@ -3,6 +3,10 @@ import type { ActivityRecognitionPlugin, PermissionStatus, GpsLocation } from '.
 export declare class ActivityRecognitionWeb extends WebPlugin implements ActivityRecognitionPlugin {
     checkPermissions(): Promise<PermissionStatus>;
     requestPermissions(): Promise<PermissionStatus>;
+    checkBatteryOptimization(): Promise<{
+        isIgnoring: boolean;
+    }>;
+    requestIgnoreBatteryOptimization(): Promise<void>;
     startTracking(_options?: {
         debug?: boolean;
         url?: string;
