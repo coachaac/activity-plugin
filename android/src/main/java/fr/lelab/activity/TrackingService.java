@@ -77,10 +77,20 @@ public class TrackingService extends Service {
         // send state for notif title/icon
         Notification notification = createNotification(shouldBeDriving ? "GPS_TRACKING" : "ACTIVITY_ONLY");
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
-        } else {
-            startForeground(NOTIFICATION_ID, notification);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+            } else {
+                startForeground(NOTIFICATION_ID, notification);
+            }
+        } catch (Exception e) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && 
+                e instanceof ForegroundServiceStartNotAllowedException) {
+                Log.e("TrackingService", "Lancement interdit en arrière-plan : " + e.getMessage());
+            }
+            // On arrête le service proprement pour éviter de laisser un service "fantôme" sans notification
+            stopSelf();
+            return START_NOT_STICKY;
         }
 
         NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);

@@ -76,7 +76,10 @@ public class ActivityRecognitionPlugin extends Plugin {
         boolean wasTracking = prefs.getBoolean("tracking_active", false);
         boolean wasDriving = prefs.getBoolean("driving_state", false);
 
-        if (wasTracking && ActivityCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+        boolean hasPerms = ActivityCompat.checkSelfPermission(getContext(), 
+                       Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+
+        if (wasTracking && hasPerms) {
 
             Log.d("SmartPilot", "🔄 Automatic activity detection re-launched");
             implementation.startTracking();
