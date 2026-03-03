@@ -347,30 +347,40 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     }
 
     @objc public override func requestPermissions(_ call: CAPPluginCall) {
+        let permissions = call.getArray("permissions", String.self) ?? []
+        
         DispatchQueue.main.async {
-            let status: CLAuthorizationStatus
-            if #available(iOS 14.0, *) {
-                status = self.locationManager.authorizationStatus
-            } else {
-                status = CLLocationManager.authorizationStatus()
+            // --- 1. ACTIVITÉ PHYSIQUE ---
+            if permissions.contains("activity") {
+                let today = Date()
+                self.activityManager.queryActivityStarting(from: today, to: today, to: .main) { (_, _) in }
             }
 
-            if status == .notDetermined {
-                // Première demande : iOS affichera d'abord la popup "When In Use"
-                // avec une mention du mode "Toujours" en option.
-                self.locationManager.requestAlwaysAuthorization()
-            } else if status == .authorizedWhenInUse {
-                // Si déjà en "When In Use", ceci déclenchera la popup d'escalade.
-                self.locationManager.requestAlwaysAuthorization()
-            } else if status == .denied || status == .restricted {
-                // Si refusé, requestAlways ne fera RIEN. 
-                // Il faut prévenir le JS pour qu'il propose d'ouvrir les réglages.
-                call.reject("Permission denied. Please enable Always in settings.")
-                return
+            // --- 2. LOCALISATION ---
+            if permissions.contains("location") || permissions.contains("backgroundLocation") {
+                let status: CLAuthorizationStatus
+                if #available(iOS 14.0, *) {
+                    status = self.locationManager.authorizationStatus
+                } else {
+                    status = CLLocationManager.authorizationStatus()
+                }
+
+                switch status {
+                case .notDetermined:
+                    // Premier passage : On demande l'autorisation de base
+                    self.locationManager.requestAlwaysAuthorization()
+                    
+                case .authorizedWhenInUse:
+                    // DEUXIÈME PASSAGE : L'utilisateur a déjà mis "Pendant l'utilisation"
+                    // Apple autorise maintenant l'escalade vers "Toujours"
+                    self.locationManager.requestAlwaysAuthorization()
+                    
+                default:
+                    break
+                }
             }
             
-            // On renvoie l'état après l'appel
-            self.checkPermissions(call) 
+            call.resolve(["location": "requested", "activity": "requested"])
         }
     }
 
