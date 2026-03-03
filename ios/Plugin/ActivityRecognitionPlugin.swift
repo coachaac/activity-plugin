@@ -334,11 +334,6 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     }
 
     @objc public override func requestPermissions(_ call: CAPPluginCall) {
-        // 1. CoreMotion
-        // CoreMotion no request method, 
-        // Automatic alert on first request 'startActivityUpdates'
-        
-        // 2. Ask for location
         DispatchQueue.main.async {
             let status: CLAuthorizationStatus
             if #available(iOS 14.0, *) {
@@ -348,16 +343,21 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             }
 
             if status == .notDetermined {
-                // First request, ask  "Always"
-                // Note: iOS display first "during use"
+                // Première demande : iOS affichera d'abord la popup "When In Use"
+                // avec une mention du mode "Toujours" en option.
                 self.locationManager.requestAlwaysAuthorization()
             } else if status == .authorizedWhenInUse {
-                // if currently "during use", request "Always"
+                // Si déjà en "When In Use", ceci déclenchera la popup d'escalade.
                 self.locationManager.requestAlwaysAuthorization()
+            } else if status == .denied || status == .restricted {
+                // Si refusé, requestAlways ne fera RIEN. 
+                // Il faut prévenir le JS pour qu'il propose d'ouvrir les réglages.
+                call.reject("Permission denied. Please enable Always in settings.")
+                return
             }
             
-            // answer to capacitor that Request done
-            call.resolve(["location": "requested"])
+            // On renvoie l'état après l'appel
+            self.checkPermissions(call) 
         }
     }
 

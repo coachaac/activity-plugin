@@ -74,7 +74,8 @@ public class ActivityRecognitionPlugin extends Plugin {
         boolean wasTracking = prefs.getBoolean("tracking_active", false);
         boolean wasDriving = prefs.getBoolean("driving_state", false);
 
-        if (wasTracking) {
+        if (wasTracking && ActivityCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+
             Log.d("SmartPilot", "🔄 Automatic activity detection re-launched");
             implementation.startTracking();
             
@@ -163,6 +164,14 @@ public class ActivityRecognitionPlugin extends Plugin {
             return "prompt"; // default id state not yet known
         }
         return state.toString();
+    }
+
+    @PluginMethod
+    public void requestPermissions(PluginCall call) {
+        // Si l'utilisateur demande le background sur Android 11+
+        // on peut ajouter une logique ici, mais Capacitor gère déjà 
+        // l'affichage des popups correspondantes aux alias déclarés dans l'annotation.
+        super.requestPermissions(call);
     }
 
     @PluginMethod
