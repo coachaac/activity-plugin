@@ -293,43 +293,56 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         var activityStatus = "prompt"
         if #available(iOS 11.0, *) {
             switch CMMotionActivityManager.authorizationStatus() {
-            case .authorized:
-                activityStatus = "granted"
-            case .denied, .restricted:
-                activityStatus = "denied"
-            case .notDetermined:
-                activityStatus = "prompt"
-            @unknown default:
-                activityStatus = "prompt"
+            case .authorized: activityStatus = "granted"
+            case .denied, .restricted: activityStatus = "denied"
+            default: activityStatus = "prompt"
             }
         }
 
         // 2. Location permission verification
-        var locationStatus: CLAuthorizationStatus
+        let locationStatus: CLAuthorizationStatus
         if #available(iOS 14.0, *) {
             locationStatus = locationManager.authorizationStatus
         } else {
             locationStatus = CLLocationManager.authorizationStatus()
         }
 
+        // Mappage pour Capacitor
         var locationResult = "prompt"
+        var backgroundStatus = "denied"
+
         switch locationStatus {
         case .authorizedAlways:
             locationResult = "granted"
+            backgroundStatus = "granted"
         case .authorizedWhenInUse:
-            locationResult = "authorizedWhenInUse" 
+            // ICI : On dit "granted" pour la localisation de base
+            // mais le background restera à "denied"
+            locationResult = "granted" 
+            backgroundStatus = "denied"
         case .denied, .restricted:
             locationResult = "denied"
+            backgroundStatus = "denied"
         case .notDetermined:
             locationResult = "prompt"
+            backgroundStatus = "prompt"
         @unknown default:
             locationResult = "prompt"
         }
 
-        // 3. Retour des résultats à Capacitor
+        // 3. Précision (Optionnel mais recommandé pour le GPS)
+        var precision = "full"
+        if #available(iOS 14.0, *) {
+            if locationManager.accuracyAuthorization == .reducedAccuracy {
+                precision = "reduced"
+            }
+        }
+
         call.resolve([
             "activity": activityStatus,
-            "location": locationResult
+            "location": locationResult, // Renvoie "granted" si WhenInUse ou Always
+            "backgroundLocation": backgroundStatus, // Permet de savoir s'il faut demander "Always"
+            "precision": precision
         ])
     }
 
