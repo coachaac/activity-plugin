@@ -300,9 +300,12 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
 
         // 2. Location permission verification
+        let checker = CLLocationManager()
+
         let locationStatus: CLAuthorizationStatus
+
         if #available(iOS 14.0, *) {
-            locationStatus = locationManager.authorizationStatus
+            locationStatus = checker.authorizationStatus
         } else {
             locationStatus = CLLocationManager.authorizationStatus()
         }
@@ -314,34 +317,46 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         switch locationStatus {
         case .authorizedAlways:
             locationResult = "granted"
-            backgroundStatus = "granted"
+
+            checker.allowsBackgroundLocationUpdates = true
+            checker.pausesLocationUpdatesAutomatically = false
+
+            // verify if iOS accept previous configuration 
+            if checker.allowsBackgroundLocationUpdates == false {
+                backgroundStatus = "denied" 
+            } else {
+                backgroundStatus = "granted"
+            }
         case .authorizedWhenInUse:
-            // ICI : On dit "granted" pour la localisation de base
-            // mais le background restera à "denied"
-            locationResult = "granted" 
-            backgroundStatus = "denied"
-        case .denied, .restricted:
-            locationResult = "denied"
-            backgroundStatus = "denied"
-        case .notDetermined:
-            locationResult = "prompt"
-            backgroundStatus = "prompt"
-        @unknown default:
-            locationResult = "prompt"
-        }
+            if #available(iOS 14.0, *) {
+                locationResult = "granted"
+                backgroundStatus = "denied"
+            } else {
+                locationResult = "granted"
+                backgroundStatus = "granted"
+            }
+            case .denied, .restricted:
+                locationResult = "denied"
+                backgroundStatus = "denied"
+            case .notDetermined:
+                locationResult = "prompt"
+                backgroundStatus = "prompt"
+            @unknown default:
+                locationResult = "prompt"
+            }
 
         // 3. Précision (Optionnel mais recommandé pour le GPS)
         var precision = "full"
         if #available(iOS 14.0, *) {
-            if locationManager.accuracyAuthorization == .reducedAccuracy {
+            if checker.accuracyAuthorization == .reducedAccuracy {
                 precision = "reduced"
             }
         }
 
         call.resolve([
             "activity": activityStatus,
-            "location": locationResult, // Renvoie "granted" si WhenInUse ou Always
-            "backgroundLocation": backgroundStatus, // Permet de savoir s'il faut demander "Always"
+            "location": locationResult, // Return "granted" si WhenInUse ou Always
+            "backgroundLocation": backgroundStatus, // if denied should request "Always"
             "precision": precision
         ])
     }
