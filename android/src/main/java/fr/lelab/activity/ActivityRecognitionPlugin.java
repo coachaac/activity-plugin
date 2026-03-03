@@ -16,6 +16,8 @@ import android.os.PowerManager;
 import android.location.LocationManager;
 import android.provider.Settings;
 
+import androidx.core.app.ActivityCompat;
+
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
