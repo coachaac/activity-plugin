@@ -236,24 +236,27 @@ public class JsonStorageHelper {
      * Analyse le fichier, segmente les trajets terminés (EXIT) et les envoie.
      */
     public static void processAndUploadAutomotiveTrips(Context context, String serverUrl, String token) {
-        
-        // syncing in progress?
-
-        if (syncInProgress != true)
-        {
-            syncInProgress = true;
-
-            JSArray allEntries = loadLocationsAsJSArray(context);
-            if (allEntries.length() == 0){
-                syncInProgress = false;
+        synchronized (ActivityRecognitionPlugin.fileLock) {
+            // syncing in progress?
+            if (syncInProgress) {
+                Log.i(TAG, "ℹ️ Already syncing");
                 return;
             }
 
-            List<JSArray> tripsToUpload = new ArrayList<>();
-            JSArray currentTrip = new JSArray();
-            double MOTORIZED_SPEED_THRESHOLD = 2.2; // ~8 km/h
+            syncInProgress = true;
 
             try {
+                JSArray allEntries = loadLocationsAsJSArray(context);
+                if (allEntries.length() == 0){
+                    syncInProgress = false;
+                    return;
+                }
+
+                List<JSArray> tripsToUpload = new ArrayList<>();
+                JSArray currentTrip = new JSArray();
+                double MOTORIZED_SPEED_THRESHOLD = 2.2; // ~8 km/h
+
+                // trip segmentation
                 for (int i = 0; i < allEntries.length(); i++) {
                     JSObject entry = JSObject.fromJSONObject(allEntries.getJSONObject(i));
                     currentTrip.put(entry);
@@ -276,35 +279,33 @@ public class JsonStorageHelper {
                     }
                 }
 
-                // Envoi et réécriture (Logique standard)
+                // Send and immediat cleaning
                 if (!tripsToUpload.isEmpty()) {
-                    boolean allSuccess = true;
-                    for (JSArray trip : tripsToUpload) {
-                        if (!uploadSingleTrip(serverUrl, token, trip)) {
-                            allSuccess = false;
-                            break;
+                    // use Iterator to remove upload trips from list
+                    Iterator<JSArray> iterator = tripsToUpload.iterator();
+                    
+                    while (iterator.hasNext()) {
+                        JSArray trip = iterator.next();
+                        
+                        if (uploadSingleTrip(serverUrl, token, trip)) {
+                            // SUCCESS : remove trip from list
+                            iterator.remove();
+                            
+                            // clean file immediatly
+                            // rewrite file with remaining data (current trip if exist + ended trip from iterator)
+                            rewriteFileWithRemainingData(context, currentTrip, tripsToUpload);
+                            Log.i(TAG, "✅ Trip uploaded and removed from local storage.");
+                        } else {
+                            // ÉCHEC : on arrête la boucle pour ce cycle (probablement réseau)
+                            Log.w(TAG, "⚠️ Upload failed, stopping sync cycle. Remaining trips kept for later.");
+                            break; 
                         }
                     }
-                    if (allSuccess) {
-                        rewriteFileWithRemainingData(context, currentTrip);
-                    }
-                    else
-                    {
-                        syncInProgress = false;
-                    }
-                }
-                else
-                {
-                    syncInProgress = false;
                 }
             } catch (JSONException e) {
                 Log.e(TAG, "❌ Error during trip processing", e);
                 syncInProgress = false;
             }
-        }
-        else
-        {
-            Log.i(TAG, "ℹ️ Already syncing");
         }
     }
 
@@ -475,22 +476,33 @@ public class JsonStorageHelper {
     }
 
     /**
-     * Écrase le fichier actuel avec uniquement les données fournies (le reliquat)
+     * rewrite file keeping remaining data
      */
-    private static void rewriteFileWithRemainingData(Context context, JSArray remainingData) {
+    private static void rewriteFileWithRemainingData(Context context, JSArray currentTrip, List<JSArray> remainingTrips) {
         File file = new File(getSafeFilesDir(context), FILE_NAME);
-        try (FileOutputStream fos = new FileOutputStream(file, false)) { 
-            for (int i = 0; i < remainingData.length(); i++) {
-                String line = remainingData.getJSONObject(i).toString() + "\n";
-                fos.write(line.getBytes());
+        
+        // Mode false pour écraser le fichier proprement
+        try (FileOutputStream fos = new FileOutputStream(file, false)) {
+            
+            // 1. Réécrire les trajets segmentés qui n'ont pas encore été envoyés
+            for (JSArray trip : remainingTrips) {
+                for (int i = 0; i < trip.length(); i++) {
+                    String line = trip.getJSONObject(i).toString() + "\n";
+                    fos.write(line.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
             }
-            Log.d(TAG, "💾 File updated with remaining incomplete trip.");
-            syncInProgress = false;
-
+            
+            // 2. Réécrire les points du trajet actuel (non terminé par un EXIT)
+            for (int i = 0; i < currentTrip.length(); i++) {
+                String line = currentTrip.getJSONObject(i).toString() + "\n";
+                fos.write(line.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+            
+            fos.flush();
         } catch (Exception e) {
-            Log.e(TAG, "❌ Error rewriting file", e);
-            syncInProgress = false;
+            Log.e(TAG, "❌ Error during file rewrite", e);
         }
+    }
     }
 
 

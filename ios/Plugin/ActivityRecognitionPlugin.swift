@@ -626,7 +626,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     // Upload to server
     //
     func processAndUploadAutomotiveTripsOnly() {
-
+        guard !syncInProgress else { return }
         self.syncInProgress = true
 
         let allEntries = self.getAllStoredLocations()
@@ -643,7 +643,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         for entry in allEntries {
             currentTrip.append(entry)
             
-            // On déclenche la fin du segment sur un EXIT automotive
+            // end segment EXIT automotive
             if let type = entry["type"] as? String, type == "activity",
                let transition = entry["transition"] as? String, transition == "EXIT",
                let activity = entry["activity"] as? String, activity == "automotive" {
@@ -662,44 +662,46 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             }
         }
 
-        remainingData = currentTrip
-
-        if finishedAutomotiveTrips.isEmpty {
-            self.saveRemainingDataOnly(remainingData)
+        // launch upload including remaing data (remaining trip not finished)
+            self.uploadTripsSequentially(tripsToUpload: finishedAutomotiveTrips, remainingData: currentTrip) {
             self.syncInProgress = false
-            return
-        }
-
-        self.uploadTripsSequentially(trips: finishedAutomotiveTrips) { allSuccess in
-            if allSuccess {
-                self.saveRemainingDataOnly(remainingData)
-                self.syncInProgress = false
-            }
-            else
-            {
-                self.syncInProgress = falseself.syncInProgress = statusend
-            }
+            print("🏁 Cycle d'upload terminé.")
         }
     }
 
-    // keep only data of the current trip
-    private func saveRemainingDataOnly(_ data: [[String: Any]]) {
+    private func saveRemainingDataOnly(_ currentTrip: [[String: Any]], otherTrips: [[[String: Any]]]) {
+
         let fileURL = getFilePath()
         
-        // Si data est vide, on peut techniquement juste supprimer le fichier
-        if data.isEmpty {
+        // aggregate all remaining data 
+        var allPointsToKeep = [[String: Any]]()
+        
+        // 1. add trip not already uploaded
+        for trip in otherTrips {
+            allPointsToKeep.append(contentsOf: trip)
+        }
+        
+        // 2. Add current trip (no EXIT yet)
+        allPointsToKeep.append(contentsOf: currentTrip)
+
+        if allPointsToKeep.isEmpty {
             try? FileManager.default.removeItem(at: fileURL)
-            print("🗑️ Fichier vidé car aucun reliquat.")
             return
         }
 
+        // Rewrite JSONL 
+        for point in allPointsToKeep {
+            if let jsonData = try? JSONSerialization.data(withJSONObject: point, options: []),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                jsonlString += jsonString + "\n"
+            }
+        }
+
         do {
-            let jsonData = try JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted])
-            // .atomic file witten in temporary file then rename ti prevent corrupted file in case of crash 
-            try jsonData.write(to: fileURL, options: .atomic)
-            print("💾 local file updated : \(data.count) points kept.")
+            // atomic wriite to prevent corrupted file true, encoding: .utf8)
+            print("💾 Fichier local mis à jour : \(allPointsToKeep.count) points restants.")
         } catch {
-            print("❌ Error during writing remaining data : \(error)")
+            print("❌ Error while writting file : \(error)")
         }
     }
 
@@ -759,24 +761,30 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         return (totalDistance > 1000 && durationSeconds > 60);
     }
 
-    private func uploadTripsSequentially(trips: [[[String: Any]]], completion: @escaping (Bool) -> Void) {
-        var remainingTrips = trips
+    private func uploadTripsSequentially(tripsToUpload: [[[String: Any]]], remainingData: [[String: Any]], completion: @escaping () -> Void) {
+        var pendingTrips = tripsToUpload
         
-        guard let nextTrip = remainingTrips.first else {
-            // Plus rien à envoyer, on a réussi tous les envois de la liste
-            completion(true)
+        guard let nextTrip = pendingTrips.first else {
+            // no more trip to send keep only remaining data
+            self.saveRemainingDataOnly(remainingData, otherTrips: [])
+            completion()
             return
         }
 
         self.uploadTripToServer(points: nextTrip) { success in
             if success {
-                print("✅ Un trajet a été envoyé.")
-                remainingTrips.removeFirst()
-                // Appel récursif pour le suivant
-                self.uploadTripsSequentially(trips: remainingTrips, completion: completion)
+                print("✅ trip sent successfully. clean local file...")
+                pendingTrips.removeFirst()
+                
+                // immediat cleaning 
+                // Rewrite file with remaining trips and remaing data (current trip running if exist)
+                self.saveRemainingDataOnly(remainingData, otherTrips: pendingTrips)
+                
+                // next one
+                self.uploadTripsSequentially(tripsToUpload: pendingTrips, remainingData: remainingData, completion: completion)
             } else {
-                print("❌ Échec de l'envoi d'un trajet. On arrête pour préserver les données.")
-                completion(false)
+                print("❌ Error keep remaining file for later try")
+                completion()
             }
         }
     }
