@@ -29,6 +29,8 @@ public class JsonStorageHelper {
     private static final String FILE_NAME = "stored_locations.json";
     private static final String TAG = "JsonStorageHelper";
 
+    private boolean syncInProgress = false;
+
     /**
     * Return Device Protected Storage
      * Allow read/write even before pin verification
@@ -234,51 +236,75 @@ public class JsonStorageHelper {
      * Analyse le fichier, segmente les trajets terminés (EXIT) et les envoie.
      */
     public static void processAndUploadAutomotiveTrips(Context context, String serverUrl, String token) {
-        JSArray allEntries = loadLocationsAsJSArray(context);
-        if (allEntries.length() == 0) return;
+        
+        // syncing in progress?
 
-        List<JSArray> tripsToUpload = new ArrayList<>();
-        JSArray currentTrip = new JSArray();
-        double MOTORIZED_SPEED_THRESHOLD = 2.2; // ~8 km/h
+        if (syncInProgress != true)
+        {
+            syncInProgress = true;
 
-        try {
-            for (int i = 0; i < allEntries.length(); i++) {
-                JSObject entry = JSObject.fromJSONObject(allEntries.getJSONObject(i));
-                currentTrip.put(entry);
-
-                // On ne déclenche la fin du segment que sur l'EXIT définitif de la voiture
-                if ("activity".equals(entry.optString("type")) && 
-                    "EXIT".equals(entry.optString("transition")) && 
-                    "automotive".equals(entry.optString("activity"))) {
-                    
-                    // --- CLEANING PHASE ---
-                    JSArray cleanedTrip = trimPedestrianStart(currentTrip, MOTORIZED_SPEED_THRESHOLD);
-                    
-                    if (isTripSignificant(cleanedTrip)) {
-                        tripsToUpload.add(cleanedTrip);
-                        Log.i(TAG, "✅ Motorized trip detected and cleaned (Points: " + cleanedTrip.length() + ")");
-                    } else {
-                        Log.d(TAG, "🚮 Segment discarded (Pedestrian only or too short)");
-                    }
-                    currentTrip = new JSArray(); 
-                }
+            JSArray allEntries = loadLocationsAsJSArray(context);
+            if (allEntries.length() == 0){
+                syncInProgress = false;
+                return;
             }
 
-            // Envoi et réécriture (Logique standard)
-            if (!tripsToUpload.isEmpty()) {
-                boolean allSuccess = true;
-                for (JSArray trip : tripsToUpload) {
-                    if (!uploadSingleTrip(serverUrl, token, trip)) {
-                        allSuccess = false;
-                        break;
+            List<JSArray> tripsToUpload = new ArrayList<>();
+            JSArray currentTrip = new JSArray();
+            double MOTORIZED_SPEED_THRESHOLD = 2.2; // ~8 km/h
+
+            try {
+                for (int i = 0; i < allEntries.length(); i++) {
+                    JSObject entry = JSObject.fromJSONObject(allEntries.getJSONObject(i));
+                    currentTrip.put(entry);
+
+                    // On ne déclenche la fin du segment que sur l'EXIT définitif de la voiture
+                    if ("activity".equals(entry.optString("type")) && 
+                        "EXIT".equals(entry.optString("transition")) && 
+                        "automotive".equals(entry.optString("activity"))) {
+                        
+                        // --- CLEANING PHASE ---
+                        JSArray cleanedTrip = trimPedestrianStart(currentTrip, MOTORIZED_SPEED_THRESHOLD);
+                        
+                        if (isTripSignificant(cleanedTrip)) {
+                            tripsToUpload.add(cleanedTrip);
+                            Log.i(TAG, "✅ Motorized trip detected and cleaned (Points: " + cleanedTrip.length() + ")");
+                        } else {
+                            Log.d(TAG, "🚮 Segment discarded (Pedestrian only or too short)");
+                        }
+                        currentTrip = new JSArray(); 
                     }
                 }
-                if (allSuccess) {
-                    rewriteFileWithRemainingData(context, currentTrip);
+
+                // Envoi et réécriture (Logique standard)
+                if (!tripsToUpload.isEmpty()) {
+                    boolean allSuccess = true;
+                    for (JSArray trip : tripsToUpload) {
+                        if (!uploadSingleTrip(serverUrl, token, trip)) {
+                            allSuccess = false;
+                            break;
+                        }
+                    }
+                    if (allSuccess) {
+                        rewriteFileWithRemainingData(context, currentTrip);
+                    }
+                    else
+                    {
+                        syncInProgress = false;
+                    }
                 }
+                else
+                {
+                    syncInProgress = false;
+                }
+            } catch (JSONException e) {
+                Log.e(TAG, "❌ Error during trip processing", e);
+                syncInProgress = false;
             }
-        } catch (JSONException e) {
-            Log.e(TAG, "❌ Error during trip processing", e);
+        }
+        else
+        {
+            Log.i(TAG, "ℹ️ Already syncing");
         }
     }
 
@@ -453,14 +479,17 @@ public class JsonStorageHelper {
      */
     private static void rewriteFileWithRemainingData(Context context, JSArray remainingData) {
         File file = new File(getSafeFilesDir(context), FILE_NAME);
-        try (FileOutputStream fos = new FileOutputStream(file, false)) { // false = écraser
+        try (FileOutputStream fos = new FileOutputStream(file, false)) { 
             for (int i = 0; i < remainingData.length(); i++) {
                 String line = remainingData.getJSONObject(i).toString() + "\n";
                 fos.write(line.getBytes());
             }
             Log.d(TAG, "💾 File updated with remaining incomplete trip.");
+            syncInProgress = false;
+
         } catch (Exception e) {
             Log.e(TAG, "❌ Error rewriting file", e);
+            syncInProgress = false;
         }
     }
 
