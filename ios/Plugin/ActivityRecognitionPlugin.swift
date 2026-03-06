@@ -267,6 +267,8 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         // reset state
         lastAutomotiveDate = nil 
         self.isDriving = false
+
+        self.syncInProgress = false
         
         // Stop engines
         activityManager.stopActivityUpdates()
@@ -624,8 +626,14 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     // Upload to server
     //
     func processAndUploadAutomotiveTripsOnly() {
+
+        self.syncInProgress = true
+
         let allEntries = self.getAllStoredLocations()
-        guard !allEntries.isEmpty else { return }
+        guard !allEntries.isEmpty else { 
+            self.syncInProgress = false
+            return 
+        }
 
         var currentTrip = [[String: Any]]()
         var finishedAutomotiveTrips = [[[String: Any]]]()
@@ -658,12 +666,18 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
         if finishedAutomotiveTrips.isEmpty {
             self.saveRemainingDataOnly(remainingData)
+            self.syncInProgress = false
             return
         }
 
         self.uploadTripsSequentially(trips: finishedAutomotiveTrips) { allSuccess in
             if allSuccess {
                 self.saveRemainingDataOnly(remainingData)
+                self.syncInProgress = false
+            }
+            else
+            {
+                self.syncInProgress = falseself.syncInProgress = statusend
             }
         }
     }
