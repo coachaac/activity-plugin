@@ -19,6 +19,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     private var lastAutomotiveDate: Date?
     private let stopDelay: TimeInterval = 180 // 3 minutes
     private var debugMode = false
+    private var syncInProgress = false
 
     private var lastSavedActivityType: String? = nil
     private var lastActivityForExit: String? = nil
@@ -870,6 +871,59 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     }
 
 
+    @objc func testSettings(_ call: CAPPluginCall) {
+        // 1. Récupération des valeurs stockées que le plugin utilise réellement
+        let urlString = UserDefaults.standard.string(forKey: "trip_server_url") ?? ""
+        let groupId = UserDefaults.standard.string(forKey: "group_id_token") ?? ""
+
+        guard let url = URL(string: urlString), !urlString.isEmpty else {
+            call.reject("URL non configurée ou invalide")
+            return
+        }
+
+        // 2. Création d'une requête de test (HEAD est plus rapide qu'un GET)
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 5.0 // Timeout court pour un test de santé
+        
+        if !groupId.isEmpty {
+            // Adapté selon si ton serveur attend le token en Header ou en paramètre
+            request.setValue("Bearer \(groupId)", forHTTPHeaderField: "Authorization")
+        }
+
+        let task = URLSession.shared.dataTask(with: request) { (_, response, error) in
+            if let error = error {
+                call.resolve([
+                    "status": "error",
+                    "message": error.localizedDescription,
+                    "url": urlString,
+                    "groupId": groupId
+                ])
+                return
+            }
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                call.resolve([
+                    "status": httpResponse.statusCode == 200 ? "ok" : "error",
+                    "statusCode": httpResponse.statusCode,
+                    "url": urlString,
+                    "groupId": groupId
+                ])
+            }
+        }
+        task.resume()
+    }
+
+    @objc func isSyncing(_ call: CAPPluginCall) {
+        call.resolve([
+            "inProgress": self.syncInProgress
+        ])
+    }
+
+    // Helper pour ton service de synchro
+    func setSyncStatus(_ status: Bool) {
+        self.syncInProgress = status
+    }
 
 
 }

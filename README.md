@@ -160,7 +160,8 @@ Vibrations are only triggered in debug mode to ensure the vibration motor doesn'
 
     //Initializes the Activity Recognition engine.
     // debug: If true, the device will vibrate twice on driving start and once on driving stop.
-    startTracking(options?: { debug?: boolean })
+    startTracking(options?: { debug?: boolean, url?: string, groupId?: string})
+    - if url and groupId provided data are sent to server (url is the acces point to save trips on server, groupId identify the group the trips belong to)
     
     // Returns a Promise with the array of all points stored in the internal JSON file.
     getSavedLocations()
