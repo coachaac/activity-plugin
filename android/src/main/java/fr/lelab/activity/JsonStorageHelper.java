@@ -20,6 +20,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Iterator;
 import org.json.JSONObject;
 import org.json.JSONArray;
 import java.util.Scanner;
@@ -29,7 +30,7 @@ public class JsonStorageHelper {
     private static final String FILE_NAME = "stored_locations.json";
     private static final String TAG = "JsonStorageHelper";
 
-    private boolean syncInProgress = false;
+    public static boolean syncInProgress = false;
 
     /**
     * Return Device Protected Storage
@@ -503,7 +504,5 @@ public class JsonStorageHelper {
             Log.e(TAG, "❌ Error during file rewrite", e);
         }
     }
-    }
-
-
+    
 }

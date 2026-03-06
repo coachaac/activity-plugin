@@ -1,6 +1,8 @@
 package fr.lelab.activity;
 
 import java.io.File;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import android.net.Uri;
 import android.content.Intent;
 import androidx.core.content.FileProvider;
@@ -57,6 +59,8 @@ public class ActivityRecognitionPlugin extends Plugin {
     private boolean isDriving = false;
 
     private static final String TAG = "ActivityRecognitionPlugin";
+
+    public static final Object fileLock = new Object();
 
     // --- HELPER : Stockage protégé pour le reboot (Direct Boot) ---
     private Context getSafeContext() {
@@ -476,11 +480,12 @@ public class ActivityRecognitionPlugin extends Plugin {
             public void isSyncing(PluginCall call) {
                 // Cette variable doit être mise à jour par ton service d'upload
                 // Par exemple via une variable statique dans ton implémentation
-                boolean syncing = implementation.isSyncInProgress(); 
+                boolean syncing = JsonStorageHelper.syncInProgress; 
                 
                 JSObject ret = new JSObject();
                 ret.put("inProgress", syncing);
                 call.resolve(ret);
             }
+
 
 }

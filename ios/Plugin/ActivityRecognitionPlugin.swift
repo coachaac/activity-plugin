@@ -689,6 +689,8 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             return
         }
 
+        var jsonlString = ""
+
         // Rewrite JSONL 
         for point in allPointsToKeep {
             if let jsonData = try? JSONSerialization.data(withJSONObject: point, options: []),
@@ -698,8 +700,9 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
 
         do {
-            // atomic wriite to prevent corrupted file true, encoding: .utf8)
-            print("💾 Fichier local mis à jour : \(allPointsToKeep.count) points restants.")
+            // atomic write to prevent corrupted file true, encoding: .utf8)
+            try jsonlString.write(to: fileURL, atomically: true, encoding: .utf8)
+            print("💾 local file updated : \(allPointsToKeep.count) remaing points.")
         } catch {
             print("❌ Error while writting file : \(error)")
         }
