@@ -23,6 +23,8 @@ public class ActivityRecognition {
     private static final String TAG = "ActivityRecognition";
     private static final String PREFS_NAME = "CapacitorStorage";
 
+    private boolean syncInProgress = false;
+
     public ActivityRecognition(Context context) {
         this.context = context;
         this.activityClient = com.google.android.gms.location.ActivityRecognition.getClient(context);

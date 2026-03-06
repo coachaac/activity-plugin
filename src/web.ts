@@ -41,6 +41,21 @@ export class ActivityRecognitionWeb extends WebPlugin implements ActivityRecogni
     console.log('Tracking stopped on web');
     return {status: "not managed on web"}
   }
+
+  async testSettings(): Promise<{ status: 'ok' | 'error'; statusCode: number; url: string; groupId: string }> {
+    console.warn('testSettings n’est pas disponible sur le Web. Simulation d’un succès.');
+    return {
+      status: 'ok',
+      statusCode: 200,
+      url: 'http://localhost/web-simulated',
+      groupId: 'web-token-demo'
+    };
+  }
+
+  async isSyncing(): Promise<{ inProgress: boolean }> {
+    // Sur le web, on considère qu'aucune synchro n'est en cours
+    return { inProgress: false };
+  }
   
 
   async getSavedLocations(): Promise<{ locations: GpsLocation[] }> {

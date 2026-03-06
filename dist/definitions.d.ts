@@ -31,6 +31,16 @@ export interface ActivityRecognitionPlugin {
         isIgnoring: boolean;
     }>;
     requestIgnoreBatteryOptimization(): Promise<void>;
+    testSettings(): Promise<{
+        status: 'ok' | 'error';
+        statusCode: number;
+        url: string;
+        groupId: string;
+        message?: string;
+    }>;
+    isSyncing(): Promise<{
+        inProgress: boolean;
+    }>;
     /**
      * get  GPS position
      */

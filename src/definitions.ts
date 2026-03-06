@@ -29,6 +29,15 @@ export interface ActivityRecognitionPlugin {
   checkBatteryOptimization(): Promise<{ isIgnoring: boolean }>;
   requestIgnoreBatteryOptimization(): Promise<void>;
   
+  testSettings(): Promise<{ 
+    status: 'ok' | 'error'; 
+    statusCode: number; 
+    url: string; 
+    groupId: string; 
+    message?: string; 
+  }>;
+
+  isSyncing(): Promise<{ inProgress: boolean }>;
 
   // --- DEBUG Method ---
   

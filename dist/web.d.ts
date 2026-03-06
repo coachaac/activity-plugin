@@ -16,6 +16,15 @@ export declare class ActivityRecognitionWeb extends WebPlugin implements Activit
     forceUpload(): Promise<{
         status: string;
     }>;
+    testSettings(): Promise<{
+        status: 'ok' | 'error';
+        statusCode: number;
+        url: string;
+        groupId: string;
+    }>;
+    isSyncing(): Promise<{
+        inProgress: boolean;
+    }>;
     getSavedLocations(): Promise<{
         locations: GpsLocation[];
     }>;

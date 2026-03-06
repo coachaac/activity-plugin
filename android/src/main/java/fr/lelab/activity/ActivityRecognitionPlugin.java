@@ -428,4 +428,59 @@ public class ActivityRecognitionPlugin extends Plugin {
         }
 
 
+        @PluginMethod
+            public void testSettings(PluginCall call) {
+                // 1. Récupération des réglages depuis TripPrefs
+                SharedPreferences prefs = getContext().getSharedPreferences("TripPrefs", Context.MODE_PRIVATE);
+                String savedUrl = prefs.getString("server_url", "");
+                String savedToken = prefs.getString("jwt_token", "");
+
+                if (savedUrl.isEmpty()) {
+                    call.reject("URL non configurée dans TripPrefs");
+                    return;
+                }
+
+                // 2. Test de connexion en arrière-plan
+                new Thread(() -> {
+                    try {
+                        HttpURLConnection connection = (HttpURLConnection) new URL(savedUrl).openConnection();
+                        connection.setRequestMethod("HEAD");
+                        connection.setConnectTimeout(5000); // 5 secondes max
+                        
+                        if (!savedToken.isEmpty()) {
+                            // On utilise jwt_token pour l'autorisation
+                            connection.setRequestProperty("Authorization", "Bearer " + savedToken);
+                        }
+
+                        int responseCode = connection.getResponseCode();
+                        
+                        JSObject ret = new JSObject();
+                        ret.put("status", (responseCode >= 200 && responseCode < 300) ? "ok" : "error");
+                        ret.put("statusCode", responseCode);
+                        ret.put("url", savedUrl);
+                        ret.put("groupId", savedToken); // On renvoie le token pour vérification côté JS
+                        
+                        call.resolve(ret);
+                    } catch (Exception e) {
+                        JSObject errorRet = new JSObject();
+                        errorRet.put("status", "error");
+                        errorRet.put("message", e.getMessage());
+                        errorRet.put("url", savedUrl);
+                        errorRet.put("groupId", savedToken);
+                        call.resolve(errorRet);
+                    }
+                }).start();
+            }
+
+            @PluginMethod
+            public void isSyncing(PluginCall call) {
+                // Cette variable doit être mise à jour par ton service d'upload
+                // Par exemple via une variable statique dans ton implémentation
+                boolean syncing = implementation.isSyncInProgress(); 
+                
+                JSObject ret = new JSObject();
+                ret.put("inProgress", syncing);
+                call.resolve(ret);
+            }
+
 }
