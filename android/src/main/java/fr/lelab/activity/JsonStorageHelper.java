@@ -306,7 +306,10 @@ public class JsonStorageHelper {
             } catch (JSONException e) {
                 Log.e(TAG, "❌ Error during trip processing", e);
                 syncInProgress = false;
+            } finally{
+                syncInProgress = false;
             }
+
         }
     }
 
