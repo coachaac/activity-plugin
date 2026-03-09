@@ -31,8 +31,25 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
         if (intent == null) return;
         String action = intent.getAction();
+
+
+        if (ACTION_STOP_GPS_GRACE.equals(action)) {
+            long scheduledAt = intent.getLongExtra("scheduled_at", 0);
+            long now = System.currentTimeMillis();
+            long drift = (scheduledAt > 0) ? (now - scheduledAt) : 0;
+
+            Log.d(TAG, "⏱ Fin du Grace Timer ! Dérive constatée : " + (drift / 1000) + " secondes.");
+            
+            // Si la dérive est énorme (> 10 min), c'est que le Doze Mode a été très agressif
+            if (drift > 600000) {
+                Log.w(TAG, "⚠️ Dérive importante détectée. Pensez à désactiver l'optimisation batterie.");
+            }
+
+            switchToIdleMode(context);
+            return;
+        }
         
-        // --- OPTIMISATION : Debug Log  ---
+
         Log.d("SmartPilot", "📩 Receved : Action = " + action);
 
         // --- 1. ALARM Management (STOP GRACE PERIOD) ---
@@ -131,28 +148,24 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
     }
 
     private void scheduleGraceAlarm(Context context) {
+        cancelGraceAlarm(context);
+
+        long now = System.currentTimeMillis();
+        long triggerAt = now + STOP_DELAY;
+
         Intent intent = new Intent(context, ActivityTransitionReceiver.class);
         intent.setAction(ACTION_STOP_GPS_GRACE);
-        
-        int flags = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) 
-            ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE 
-            : PendingIntent.FLAG_UPDATE_CURRENT;
+        // On ajoute le timestamp prévu pour le calcul de dérive
+        intent.putExtra("scheduled_at", triggerAt);
 
-        PendingIntent pi = PendingIntent.getBroadcast(context, 0, intent, flags);
+        PendingIntent pi = PendingIntent.getBroadcast(context, 0, intent, 
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
         AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-        
-        // Calcul du moment de déclenchement (3 minutes)
-        long triggerAt = System.currentTimeMillis() + STOP_DELAY;
-
         if (am != null) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                // Version "Play Store Friendly" : Inexacte mais fonctionne pendant le mode Doze
-                // Le système peut décaler un peu pour grouper les alarmes et économiser la batterie.
-                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi);
-                Log.d(TAG, "⏰ Alarme set (Inexacte/AllowWhileIdle) - Compatibility with Play Store");
-            } else {
-                am.set(AlarmManager.RTC_WAKEUP, triggerAt, pi);
-            }
+            // Fenêtre de 30 secondes pour laisser de la souplesse à l'OS sans sacrifier la précision
+            am.setWindow(AlarmManager.RTC_WAKEUP, triggerAt, 30000, pi);
+            Log.d(TAG, "⏰ Alarme programmée à " + (STOP_DELAY / 1000) + "s (Fenêtre 30s)");
         }
     }
 
