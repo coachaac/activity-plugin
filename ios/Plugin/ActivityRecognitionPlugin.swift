@@ -761,7 +761,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         print("🛣️ Trajet réel: \(Int(totalDistance))m, Durée: \(Int(durationSeconds))s")
 
         //  > 1000m  and > 60s
-        return (totalDistance > 1000 && durationSeconds > 60);
+        return (totalDistance > 500 && durationSeconds > 60);
     }
 
     private func uploadTripsSequentially(tripsToUpload: [[[String: Any]]], remainingData: [[String: Any]], completion: @escaping () -> Void) {

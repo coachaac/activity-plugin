@@ -342,8 +342,8 @@ public class JsonStorageHelper {
 
             Log.d("TripValidation", "Route réelle: " + totalDistance + "m en " + durationSeconds + "s");
 
-            // Critères : > 1km and > 60s
-            return (totalDistance > 1000 && durationSeconds > 60);
+            // > 500m and > 60s
+            return (totalDistance > 500 && durationSeconds > 60);
 
         } catch (JSONException e) {
             return false;
