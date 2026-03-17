@@ -136,8 +136,8 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
             JsonStorageHelper.scheduleNextWeatherUpdate(context);
         } 
         else if (
-            (DetectedActivity.IN_VEHICLE == activityType && transitionType == ActivityTransition.ACTIVITY_TRANSITION_EXIT) || 
-            (transitionType == ActivityTransition.ACTIVITY_TRANSITION_ENTER && DetectedActivity.IN_VEHICLE != activityType)
+            (DetectedActivity.IN_VEHICLE == activityType && transitionType == ActivityTransition.ACTIVITY_TRANSITION_EXIT) 
+            || (transitionType == ActivityTransition.ACTIVITY_TRANSITION_ENTER && DetectedActivity.IN_VEHICLE != activityType)
         ) {
             if (isServiceRunning(context)) {
                 Log.d(TAG, "⏳ Détection : Likely end of automotive activity. Timer 3min launched.");

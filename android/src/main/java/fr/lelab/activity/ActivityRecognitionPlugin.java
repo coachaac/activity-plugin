@@ -140,7 +140,7 @@ public class ActivityRecognitionPlugin extends Plugin {
             } else if ("automotive".equals(activityType) && "EXIT".equals(transition)) {
                 if (instance.debugMode) instance.triggerVibration(1);
             }
-            // Nom du listener harmonisé avec le JS
+            // notify js with new activity state
             instance.notifyListeners("activityChange", data);
         }
     }

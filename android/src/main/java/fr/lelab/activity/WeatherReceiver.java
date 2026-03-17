@@ -58,8 +58,13 @@ public class WeatherReceiver extends BroadcastReceiver {
 
                             // Calcul de la distance en mètres
                             float distance = location.distanceTo(lastLocation);
+
+                            long lastUpdate = prefs.getLong("last_weather_timestamp", 0);
+                            long currentTime = System.currentTimeMillis();
+                            long tenMinutesInMillis = 10 * 60 * 1000;
+                            boolean isExpired = (currentTime - lastUpdate) > tenMinutesInMillis;
                             
-                            if (force || lastLat == 0 || distance >= 2000 || true) {
+                            if (force || lastLat == 0 || distance >= 2000 || isExpired) {
                                 Log.d(TAG, force ? "Weather fetch FORCED" : "Weather fetch: move of " + Math.round(distance) + "m");
                                 new Thread(() -> {
                                     try{

@@ -117,6 +117,23 @@ public class TrackingService extends Service {
         String content;
         int icon;
 
+        // create intent to open app on click
+        Intent intent = getPackageManager().getLaunchIntentForPackage(getPackageName());
+            PendingIntent pendingIntent = null;
+            
+            if (intent != null) {
+                // FLAG_ACTIVITY_SINGLE_TOP évite de recréer une nouvelle instance si l'app est déjà ouverte
+                intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                
+                // FLAG_IMMUTABLE est requis pour Android 12+ (API 31+)
+                pendingIntent = PendingIntent.getActivity(
+                    this, 
+                    0, 
+                    intent, 
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+                );
+            }
+
         // adapt content depending on state
         if ("GPS_TRACKING".equals(state)) {
             title = "Trajet en cours";
@@ -128,15 +145,20 @@ public class TrackingService extends Service {
             icon = android.R.drawable.ic_menu_mylocation; 
         }
 
-        return new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle(title)
-                .setContentText(content)
-                .setSmallIcon(icon)
-                .setOngoing(true)
-                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-                .setCategory(Notification.CATEGORY_SERVICE)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-                .build();
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(content)
+            .setSmallIcon(icon)
+            .setOngoing(true)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_LOW);
+
+            if (pendingIntent != null) {
+                builder.setContentIntent(pendingIntent);
+            }
+
+            return builder.build();
     }
 
     private void startLocationUpdates() {
