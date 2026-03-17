@@ -98,8 +98,10 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
         } else {
             context.startService(serviceIntent);
         }
+
+        Log.d(TAG, "🔋 Stop Weather Updates");
+        JsonStorageHelper.cancelWeatherUpdates(context);
         
-        // no more nm.cancel(1) to keep notif !
     }
 
     private void handleTransition(Context context, int activityType, int transitionType) {
@@ -128,7 +130,10 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
             Log.d(TAG, "🚗 Détection : Automotive mode. Start GPS.");
             updateDrivingState(safeContext, true); // Persistance Direct Boot
             cancelGraceAlarm(context);
+
+            Log.d(TAG, "🚗 Start GPS & Weather");
             startTrackingService(context);
+            JsonStorageHelper.scheduleNextWeatherUpdate(context);
         } 
         else if (
             (DetectedActivity.IN_VEHICLE == activityType && transitionType == ActivityTransition.ACTIVITY_TRANSITION_EXIT) || 

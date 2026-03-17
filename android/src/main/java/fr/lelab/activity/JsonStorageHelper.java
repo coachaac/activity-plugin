@@ -3,6 +3,9 @@ package fr.lelab.activity;
 import android.content.Context;
 import android.os.Build;
 import android.util.Log;
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.content.Intent;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import org.json.JSONException;
@@ -32,6 +35,8 @@ public class JsonStorageHelper {
 
     public static boolean syncInProgress = false;
 
+    private static JSObject lastWeather = null;
+
     /**
     * Return Device Protected Storage
      * Allow read/write even before pin verification
@@ -47,23 +52,29 @@ public class JsonStorageHelper {
     /**
      * Save location APPEND mode
      */
-    public static void saveLocation(Context context, double lat, double lng, float speed) {
-        File file = new File(getSafeFilesDir(context), FILE_NAME);
-        
-        JSObject location = new JSObject();
-        location.put("type", "location"); 
-        location.put("lat", lat);
-        location.put("lng", lng);
-        location.put("speed", speed);
-        location.put("date", getFormattedDate());
-        location.put("timestamp", System.currentTimeMillis());
+    public static void saveLocation(Context context, double lat, double lng, float speed, JSObject weather) {
+       synchronized (ActivityRecognitionPlugin.fileLock) {
+           File file = new File(getSafeFilesDir(context), FILE_NAME);
+            
+            JSObject location = new JSObject();
+            location.put("type", "location"); 
+            location.put("lat", lat);
+            location.put("lng", lng);
+            location.put("speed", speed);
+            location.put("date", getFormattedDate());
+            location.put("timestamp", System.currentTimeMillis());
 
-        String entry = location.toString() + "\n";
+            if (weather != null) {
+                location.put("weather", weather);
+            }
 
-        try (FileOutputStream fos = new FileOutputStream(file, true)) {
-            fos.write(entry.getBytes());
-        } catch (IOException e) {
-            Log.e(TAG, "❌ Error during Append position writing", e);
+            String entry = location.toString() + "\n";
+
+            try (FileOutputStream fos = new FileOutputStream(file, true)) {
+                fos.write(entry.getBytes());
+            } catch (IOException e) {
+                Log.e(TAG, "❌ Error during Append position writing", e);
+            }
         }
     }
 
@@ -71,22 +82,24 @@ public class JsonStorageHelper {
      * Sauvegarde un changement d'activité
      */
     public static void saveActivity(Context context, String activityName, String transitionName) {
-        File file = new File(getSafeFilesDir(context), FILE_NAME);
-        
-        JSObject activity = new JSObject();
-        activity.put("type", "activity");
-        activity.put("activity", activityName);
-        activity.put("transition", transitionName);
-        activity.put("date", getFormattedDate());
-        activity.put("timestamp", System.currentTimeMillis());
-        
-        String entry = activity.toString() + "\n";
+        synchronized (ActivityRecognitionPlugin.fileLock) {
+            File file = new File(getSafeFilesDir(context), FILE_NAME);
+            
+            JSObject activity = new JSObject();
+            activity.put("type", "activity");
+            activity.put("activity", activityName);
+            activity.put("transition", transitionName);
+            activity.put("date", getFormattedDate());
+            activity.put("timestamp", System.currentTimeMillis());
+            
+            String entry = activity.toString() + "\n";
 
-        try (FileOutputStream fos = new FileOutputStream(file, true)) {
-            fos.write(entry.getBytes());
-            Log.d(TAG, "🏃 Activity registered : " + activityName);
-        } catch (IOException e) {
-            Log.e(TAG, "❌ Error during Append activity writing", e);
+            try (FileOutputStream fos = new FileOutputStream(file, true)) {
+                fos.write(entry.getBytes());
+                Log.d(TAG, "🏃 Activity registered : " + activityName);
+            } catch (IOException e) {
+                Log.e(TAG, "❌ Error during Append activity writing", e);
+            }
         }
     }
 
@@ -238,84 +251,85 @@ public class JsonStorageHelper {
      */
     public static void processAndUploadAutomotiveTrips(Context context, String serverUrl, String token) {
         synchronized (ActivityRecognitionPlugin.fileLock) {
-            // syncing in progress?
-            if (syncInProgress) {
-                Log.i(TAG, "ℹ️ Already syncing");
-                return;
-            }
-
+            if (syncInProgress) return;
             syncInProgress = true;
 
             try {
                 JSArray allEntries = loadLocationsAsJSArray(context);
-                if (allEntries.length() == 0){
+                if (allEntries.length() == 0) {
                     syncInProgress = false;
                     return;
                 }
 
-                List<JSArray> tripsToUpload = new ArrayList<>();
-                JSArray currentTrip = new JSArray();
-                double MOTORIZED_SPEED_THRESHOLD = 2.2; // ~8 km/h
+                List<JSArray> completedTrips = new ArrayList<>();
+                JSArray currentSegment = new JSArray();
+                int lastProcessedIndex = -1;
 
-                // trip segmentation
+                // 1. Segmentation avec "Look-ahead"
+                // On ne valide un EXIT que s'il y a des points après (stabilisation)
                 for (int i = 0; i < allEntries.length(); i++) {
                     JSObject entry = JSObject.fromJSONObject(allEntries.getJSONObject(i));
-                    currentTrip.put(entry);
+                    currentSegment.put(entry);
 
-                    // On ne déclenche la fin du segment que sur l'EXIT définitif de la voiture
-                    if ("activity".equals(entry.optString("type")) && 
-                        "EXIT".equals(entry.optString("transition")) && 
-                        "automotive".equals(entry.optString("activity"))) {
-                        
-                        // --- CLEANING PHASE ---
-                        JSArray cleanedTrip = trimPedestrianStart(currentTrip, MOTORIZED_SPEED_THRESHOLD);
-                        
-                        if (isTripSignificant(cleanedTrip)) {
-                            tripsToUpload.add(cleanedTrip);
-                            Log.i(TAG, "✅ Motorized trip detected and cleaned (Points: " + cleanedTrip.length() + ")");
-                        } else {
-                            Log.d(TAG, "🚮 Segment discarded (Pedestrian only or too short)");
-                        }
-                        currentTrip = new JSArray(); 
-                    }
-                }
+                    boolean isExit = "activity".equals(entry.optString("type")) && 
+                                     "EXIT".equals(entry.optString("transition")) && 
+                                     "automotive".equals(entry.optString("activity"));
 
-                // Send and immediat cleaning
-                if (!tripsToUpload.isEmpty()) {
-                    // use Iterator to remove upload trips from list
-                    Iterator<JSArray> iterator = tripsToUpload.iterator();
-                    
-                    while (iterator.hasNext()) {
-                        JSArray trip = iterator.next();
-                        
-                        if (uploadSingleTrip(serverUrl, token, trip)) {
-                            // SUCCESS : remove trip from list
-                            iterator.remove();
-                            
-                            // clean file immediatly
-                            // rewrite file with remaining data (current trip if exist + ended trip from iterator)
-                            rewriteFileWithRemainingData(context, currentTrip, tripsToUpload);
-                            Log.i(TAG, "✅ Trip uploaded and removed from local storage.");
+                    if (isExit) {
+                        // On vérifie s'il y a au moins 3 points après l'EXIT pour confirmer la fin
+                        if (i < allEntries.length() - 3) {
+                            JSArray cleaned = trimPedestrianStart(currentSegment, 1.4);
+                            if (isTripSignificant(cleaned)) {
+                                completedTrips.add(cleaned);
+                            }
+                            currentSegment = new JSArray(); // Reset pour le prochain trajet
+                            lastProcessedIndex = i; // On marque jusqu'où on a traité
                         } else {
-                            // ÉCHEC : on arrête la boucle pour ce cycle (probablement réseau)
-                            Log.w(TAG, "⚠️ Upload failed, stopping sync cycle. Remaining trips kept for later.");
+                            // Pas assez de recul, on s'arrête là pour ce cycle
                             break; 
                         }
                     }
                 }
-            } catch (JSONException e) {
-                Log.e(TAG, "❌ Error during trip processing", e);
-                syncInProgress = false;
-            } finally{
+
+                // 2. Upload des trajets complétés
+                List<JSArray> failedUploads = new ArrayList<>();
+                for (JSArray trip : completedTrips) {
+                    if (!uploadSingleTrip(serverUrl, token, trip)) {
+                        failedUploads.add(trip); // On garde en mémoire les échecs réseau
+                    }
+                }
+
+                // 3. Reconstruction des données restantes à sauvegarder
+                // On veut garder : les échecs d'upload + tout ce qui n'a pas été segmenté
+                JSArray dataToKeep = new JSArray();
+
+                // Ajouter les trajets qui ont échoué à l'upload
+                for (JSArray failed : failedUploads) {
+                    for (int j = 0; j < failed.length(); j++) {
+                        dataToKeep.put(failed.get(j));
+                    }
+                }
+
+                // Ajouter tout ce qui se trouve après le dernier EXIT validé
+                for (int k = lastProcessedIndex + 1; k < allEntries.length(); k++) {
+                    dataToKeep.put(allEntries.get(k));
+                }
+
+                // 4. RÉÉCRITURE UNIQUE ET FINALE
+                // On passe une liste vide en 3ème paramètre car dataToKeep contient déjà tout
+                rewriteFileWithRemainingData(context, dataToKeep, new ArrayList<>());
+
+            } catch (Exception e) {
+                Log.e(TAG, "❌ Erreur critique de traitement", e);
+            } finally {
                 syncInProgress = false;
             }
-
         }
     }
 
     // exclude small trips
     private static boolean isTripSignificant(JSArray trip) {
-        if (trip.length() < 2) return false;
+        if (trip.length() < 5) return false;
 
         double totalDistance = 0;
         long durationSeconds = 0;
@@ -343,7 +357,7 @@ public class JsonStorageHelper {
             Log.d("TripValidation", "Route réelle: " + totalDistance + "m en " + durationSeconds + "s");
 
             // > 500m and > 60s
-            return (totalDistance > 500 && durationSeconds > 60);
+            return (totalDistance > 350 && durationSeconds > 45);
 
         } catch (JSONException e) {
             return false;
@@ -388,8 +402,9 @@ public class JsonStorageHelper {
 
         // 2. Si on a trouvé un début motorisé, on garde tout à partir de là
         if (firstMotorizedIndex != -1) {
-            // Optionnel : on peut reculer de 1 ou 2 points pour avoir l'immobilisme juste avant le départ
-            int startIndex = Math.max(0, firstMotorizedIndex - 1); 
+            // Optionnal : we can go back from some point 1, 2 or 3 to get points just before start 
+            int pointBefore = 3; // here 3 points
+            int startIndex = Math.max(0, firstMotorizedIndex - pointBefore); 
             for (int i = startIndex; i < trip.length(); i++) {
                 cleaned.put(trip.get(i));
             }
@@ -485,27 +500,131 @@ public class JsonStorageHelper {
     private static void rewriteFileWithRemainingData(Context context, JSArray currentTrip, List<JSArray> remainingTrips) {
         File file = new File(getSafeFilesDir(context), FILE_NAME);
         
-        // Mode false pour écraser le fichier proprement
-        try (FileOutputStream fos = new FileOutputStream(file, false)) {
+        // On utilise un BufferedOutputStream pour plus d'efficacité
+        try (FileOutputStream fos = new FileOutputStream(file, false);
+             BufferedOutputStream bos = new BufferedOutputStream(fos)) {
             
-            // 1. Réécrire les trajets segmentés qui n'ont pas encore été envoyés
-            for (JSArray trip : remainingTrips) {
-                for (int i = 0; i < trip.length(); i++) {
-                    String line = trip.getJSONObject(i).toString() + "\n";
-                    fos.write(line.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            // 1. Réécrire les trajets segmentés qui n'ont pas encore été envoyés (échecs d'upload)
+            if (remainingTrips != null) {
+                for (JSArray trip : remainingTrips) {
+                    for (int i = 0; i < trip.length(); i++) {
+                        String line = trip.getJSONObject(i).toString() + "\n";
+                        bos.write(line.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    }
                 }
             }
             
-            // 2. Réécrire les points du trajet actuel (non terminé par un EXIT)
-            for (int i = 0; i < currentTrip.length(); i++) {
-                String line = currentTrip.getJSONObject(i).toString() + "\n";
-                fos.write(line.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            // 2. Réécrire les points du trajet actuel (ceux après le dernier EXIT validé)
+            if (currentTrip != null) {
+                for (int i = 0; i < currentTrip.length(); i++) {
+                    String line = currentTrip.getJSONObject(i).toString() + "\n";
+                    bos.write(line.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
             }
             
-            fos.flush();
+            bos.flush();
+            Log.d(TAG, "💾 Fichier réécrit avec succès. Données conservées pour le prochain cycle.");
         } catch (Exception e) {
-            Log.e(TAG, "❌ Error during file rewrite", e);
+            Log.e(TAG, "❌ Erreur critique lors de la réécriture du fichier: " + e.getMessage());
         }
+    }
+
+    //
+    // manage schedule to get weather every 5 min
+    //
+    public static void scheduleNextWeatherUpdate(Context context) {
+
+        Log.i(TAG, "ℹ️ launch weather update: ");
+
+        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        Intent intent = new Intent(context, WeatherReceiver.class);
+        
+        PendingIntent pi = PendingIntent.getBroadcast(context, 1002, intent, 
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        long fiveMinutes = 5 * 60 * 1000;
+        long triggerAt = System.currentTimeMillis() + fiveMinutes;
+
+        if (am != null) {
+            // setWindow est parfait ici : 5min avec 30s de marge
+            am.setWindow(AlarmManager.RTC_WAKEUP, triggerAt, 30000, pi);
+        }
+    }
+
+    //
+    // cancel 5 min schedule for weather update
+    //
+    public static void cancelWeatherUpdates(Context context) {
+    Intent intent = new Intent(context, WeatherReceiver.class);
+    
+    PendingIntent pi = PendingIntent.getBroadcast(
+        context, 
+        1002, 
+        intent, 
+        PendingIntent.FLAG_NO_CREATE | PendingIntent.FLAG_IMMUTABLE
+    );
+
+    if (pi != null) {
+        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (am != null) {
+            am.cancel(pi);
+            pi.cancel(); 
+            Log.d("JsonStorageHelper", "🛑 Météo : Alarms ended");
+        }
+    }
+}
+
+    //
+    // save last json weather received
+    // 
+    public static void setLastWeather(JSObject weatherData) {
+        // 1. Créer un NOUVEL objet immédiatement (pour éviter le NullPointerException)
+        JSObject weatherBrief = new JSObject();
+        
+        try {
+            if (weatherData != null && weatherData.has("weather")) {
+                JSONArray weatherArray = weatherData.getJSONArray("weather");
+                JSONObject firstWeather = weatherArray.getJSONObject(0);
+                int weatherCondition = firstWeather.getInt("id");
+                
+                JSONObject mainObj = weatherData.getJSONObject("main");
+                double temperature = mainObj.getDouble("temp");
+
+                String condition = "sunny"; // Valeur par défaut
+
+                if ((weatherCondition >= 200 && weatherCondition < 300) || (weatherCondition >= 900 && weatherCondition < 903))
+                    condition = "stormy";
+                else if ((weatherCondition >= 300 && weatherCondition < 400) || (weatherCondition >= 500 && weatherCondition < 600))
+                    condition = "rainy";
+                else if (weatherCondition >= 600 && weatherCondition < 700)
+                    condition = "snowy";
+                else if (weatherCondition >= 700 && weatherCondition < 800)
+                    condition = "foggy";
+                else if (weatherCondition >= 800 && weatherCondition < 900)
+                    condition = "sunny";
+
+                weatherBrief.put("type", condition);
+                weatherBrief.put("temp", temperature);
+            } else {
+                weatherBrief.put("type", "unknown");
+                weatherBrief.put("temp", -999);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            weatherBrief.put("type", "unknown");
+            weatherBrief.put("temp", -999);
+        }
+
+        // 2. Assigner l'objet local rempli à la variable statique de la classe
+        lastWeather = weatherBrief; 
+        Log.d("JsonStorageHelper", "☀️ Météo updated in cache : " + lastWeather.toString());
+    }
+
+    //
+    // get last json weather received
+    // 
+    public static JSObject getLastWeather() {
+        return lastWeather;
     }
     
 }

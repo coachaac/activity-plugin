@@ -22,6 +22,8 @@ export interface ActivityRecognitionPlugin {
         debug?: boolean;
         url?: string;
         groupId?: string;
+        weatherUrl?: string;
+        weatherAPIkey?: string;
     }): Promise<void>;
     stopTracking(): Promise<void>;
     forceUpload(): Promise<{

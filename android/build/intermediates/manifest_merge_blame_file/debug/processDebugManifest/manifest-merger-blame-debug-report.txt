@@ -42,91 +42,104 @@
 18-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:20:22-92
 19
 20    <application>
-20-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:22:5-70:19
-21        <service
-21-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:24:9-29:44
-22            android:name="fr.lelab.activity.TrackingService"
-22-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:25:13-61
-23            android:enabled="true"
-23-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:27:13-35
-24            android:exported="false"
-24-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:28:13-37
-25            android:foregroundServiceType="location"
-25-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:26:13-53
-26            android:stopWithTask="false" />
-26-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:29:13-41
-27
-28        <receiver
-28-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:31:9-40:20
-29            android:name="fr.lelab.activity.ActivityTransitionReceiver"
-29-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:32:13-55
-30            android:directBootAware="true"
-30-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:35:13-43
-31            android:enabled="true"
-31-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:33:13-35
-32            android:exported="true" >
-32-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:34:13-36
-33            <intent-filter>
-33-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:36:13-39:29
-34                <action android:name="fr.lelab.activity.ACTION_STOP_GPS_GRACE" />
-34-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:37:17-82
-34-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:37:25-79
-35                <action android:name="fr.lelab.activity.ACTION_PROCESS_ACTIVITY_TRANSITIONS" />
-35-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:38:17-96
-35-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:38:25-93
-36            </intent-filter>
-37        </receiver>
-38        <receiver
-38-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:42:9-52:20
-39            android:name="fr.lelab.activity.BootReceiver"
-39-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:43:13-58
-40            android:directBootAware="true"
-40-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:46:13-43
-41            android:enabled="true"
-41-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:44:13-35
-42            android:exported="true" >
-42-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:45:13-36
-43            <intent-filter>
-43-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:47:13-51:29
-44                <action android:name="android.intent.action.BOOT_COMPLETED" />
-44-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:48:17-79
-44-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:48:25-76
-45                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
-45-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:49:17-86
-45-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:49:25-83
-46                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
-46-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:50:17-82
-46-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:50:25-79
-47            </intent-filter>
-48        </receiver>
-49        <receiver
-49-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:54:9-58:45
-50            android:name="fr.lelab.activity.LocationReceiver"
-50-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:55:13-62
-51            android:directBootAware="true"
-51-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:58:13-43
-52            android:enabled="true"
-52-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:56:13-35
-53            android:exported="true" />
-53-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:57:13-36
-54
-55        <provider
-55-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:60:9-68:20
-56            android:name="androidx.core.content.FileProvider"
-56-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:61:13-62
-57            android:authorities="${applicationId}.fileprovider"
-57-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:62:13-64
-58            android:exported="false"
-58-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:63:13-37
-59            android:grantUriPermissions="true" >
-59-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:64:13-47
-60            <meta-data
-60-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:65:13-67:54
-61                android:name="android.support.FILE_PROVIDER_PATHS"
-61-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:66:17-67
-62                android:resource="@xml/file_paths" />
-62-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:67:17-51
-63        </provider>
-64    </application>
-65
-66</manifest>
+20-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:22:5-76:19
+21        <meta-data
+21-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:23:9-25:69
+22            android:name="com.google.android.gms.version"
+22-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:24:13-58
+23            android:value="@integer/google_play_services_version" />
+23-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:25:13-66
+24
+25        <service
+25-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:27:9-32:44
+26            android:name="fr.lelab.activity.TrackingService"
+26-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:28:13-61
+27            android:enabled="true"
+27-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:30:13-35
+28            android:exported="false"
+28-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:31:13-37
+29            android:foregroundServiceType="location"
+29-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:29:13-53
+30            android:stopWithTask="false" />
+30-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:32:13-41
+31
+32        <receiver
+32-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:34:9-43:20
+33            android:name="fr.lelab.activity.ActivityTransitionReceiver"
+33-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:35:13-55
+34            android:directBootAware="true"
+34-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:38:13-43
+35            android:enabled="true"
+35-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:36:13-35
+36            android:exported="true" >
+36-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:37:13-36
+37            <intent-filter>
+37-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:39:13-42:29
+38                <action android:name="fr.lelab.activity.ACTION_STOP_GPS_GRACE" />
+38-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:40:17-82
+38-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:40:25-79
+39                <action android:name="fr.lelab.activity.ACTION_PROCESS_ACTIVITY_TRANSITIONS" />
+39-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:41:17-96
+39-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:41:25-93
+40            </intent-filter>
+41        </receiver>
+42        <receiver
+42-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:45:9-55:20
+43            android:name="fr.lelab.activity.BootReceiver"
+43-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:46:13-58
+44            android:directBootAware="true"
+44-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:49:13-43
+45            android:enabled="true"
+45-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:47:13-35
+46            android:exported="true" >
+46-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:48:13-36
+47            <intent-filter>
+47-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:50:13-54:29
+48                <action android:name="android.intent.action.BOOT_COMPLETED" />
+48-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:51:17-79
+48-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:51:25-76
+49                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+49-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:52:17-86
+49-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:52:25-83
+50                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+50-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:53:17-82
+50-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:53:25-79
+51            </intent-filter>
+52        </receiver>
+53        <receiver
+53-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:57:9-61:45
+54            android:name="fr.lelab.activity.LocationReceiver"
+54-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:58:13-62
+55            android:directBootAware="true"
+55-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:61:13-43
+56            android:enabled="true"
+56-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:59:13-35
+57            android:exported="true" />
+57-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:60:13-36
+58        <receiver
+58-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:63:9-64:40
+59            android:name="fr.lelab.activity.WeatherReceiver"
+59-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:63:19-67
+60            android:exported="false" />
+60-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:64:13-37
+61
+62        <provider
+62-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:66:9-74:20
+63            android:name="androidx.core.content.FileProvider"
+63-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:67:13-62
+64            android:authorities="${applicationId}.fileprovider"
+64-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:68:13-64
+65            android:exported="false"
+65-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:69:13-37
+66            android:grantUriPermissions="true" >
+66-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:70:13-47
+67            <meta-data
+67-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:71:13-73:54
+68                android:name="android.support.FILE_PROVIDER_PATHS"
+68-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:72:17-67
+69                android:resource="@xml/file_paths" />
+69-->/Users/philippethauvin/Development/capacitor/plugins/activity-plugin/android/src/main/AndroidManifest.xml:73:17-51
+70        </provider>
+71    </application>
+72
+73</manifest>

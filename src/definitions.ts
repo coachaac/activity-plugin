@@ -21,7 +21,7 @@ export interface ActivityRecognitionPlugin {
   checkPermissions(): Promise<PermissionStatus>;
   requestPermissions(options?: { permissions: string[] }): Promise<PermissionStatus>;
 
-  startTracking(options?: { debug?: boolean, url?: string, groupId?: string }): Promise<void>;
+  startTracking(options?: { debug?: boolean, url?: string, groupId?: string, weatherUrl?: string, weatherAPIkey?: string }): Promise<void>;
   stopTracking(): Promise<void>;
 
   forceUpload(): Promise<{ status: string }>;

@@ -33,6 +33,17 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     private let kIsTrackingActive = "tracking_active"
     private let kIsDrivingState = "driving_state"
 
+
+    private var weatherApiKey: String?
+    private var weatherBaseUrl: String?
+
+    private static var lastWeatherCache: [String: Any]? = nil
+    private var lastWeatherFetchDate: Date? = nil
+    private let weatherUpdateInterval: TimeInterval = 300 // 5 minutes
+
+    private var lastWeatherLocation: CLLocation? = nil
+    private let weatherDistanceThreshold: CLLocationDistance = 2000 // 2 km
+
     @objc public override func load() {
         locationManager.delegate = self
         locationManager.pausesLocationUpdatesAutomatically = false
@@ -49,6 +60,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             // if was running restore highPrecision GPS
             if wasDriving {
                 self.isDriving = true
+                self.lastAutomotiveDate = Date()
                 startHighPrecisionGPS()
             }
         }
@@ -130,7 +142,19 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
                 print("🚗 Automotive START")
                 self.isDriving = true
                 UserDefaults.standard.set(true, forKey: kIsDrivingState)
+
+                if let currentLoc = locationManager.location {
+                    print("🌤️ Automotive detect: triggering initial weather fetch")
+                    // Init for didUpdateLocations logic
+                    self.lastWeatherLocation = currentLoc
+                    self.lastWeatherFetchDate = now
+
+                    self.fetchWeatherData(lat: currentLoc.coordinate.latitude, lon: currentLoc.coordinate.longitude)
+                }
+
                 startHighPrecisionGPS()
+                activityLock.unlock()
+                return
             }
         }
 
@@ -255,7 +279,24 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         self.serverUrl = url
         self.groupId = groupId
 
+        self.weatherApiKey = call.getString("weatherKey")
+        if let customWeatherUrl = call.getString("weatherUrl") {
+            self.weatherBaseUrl = customWeatherUrl
+        }
+
+        // Persistance pour le redémarrage (Optionnel)
+        UserDefaults.standard.set(self.weatherApiKey, forKey: "weather_api_key")
+        UserDefaults.standard.set(self.weatherBaseUrl, forKey: "weather_base_url")
+
+        if !CMMotionActivityManager.isActivityAvailable() {
+            print("❌ Motion Activity not available on this device")
+        }
+        
+        // Relancer proprement les updates
+        activityManager.stopActivityUpdates() // Clean start
         startActivityDetection()
+
+
         locationManager.startMonitoringSignificantLocationChanges()
         call.resolve()
     }
@@ -403,40 +444,89 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     }
 
     public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        
         guard let location = locations.last else { return }
+        let now = Date()
 
-        // print("📍 Point reçu - Vitesse: \(location.speed), Accuracy: \(location.horizontalAccuracy)")
-
-        if location.speed > 2.0 {
-            self.lastAutomotiveDate = Date()
+        // 1. Detection BOOSTER (speed > 14 km/h)
+        // Precision (<= 20m) prevent bad GPS position during fix
+        if location.speed > 4 && location.horizontalAccuracy <= 20 { 
+            self.lastAutomotiveDate = now
+            
+            if !self.isDriving {
+                print("🚀 High speed detected (\(location.speed)m/s). Forcing Driving mode.")
+                self.isDriving = true
+                UserDefaults.standard.set(true, forKey: kIsDrivingState)
+                
+                // Initialisation immédiate des compteurs météo pour éviter un double appel
+                self.lastWeatherLocation = location
+                self.lastWeatherFetchDate = now
+                fetchWeatherData(lat: location.coordinate.latitude, lon: location.coordinate.longitude)
+                
+                // Log de l'événement ENTER pour le trajet
+                let enterData = formatActivityData(type: "automotive", transition: "ENTER")
+                saveLocationToJSON(point: enterData)
+                self.notifyListeners("activityChange", data: enterData)
+                
+                startHighPrecisionGPS()
+            }
         }
-        // --- Exit WATCHDOG Logic ---
-        else if self.isDriving {
+
+        // 2. Rfresh weather if already driving
+        if self.isDriving {
+            // new weather after 10 min
+            let weatherTimeThreshold: TimeInterval = 600 
+            let timeSinceLastFetch = lastWeatherFetchDate == nil ? weatherTimeThreshold : now.timeIntervalSince(lastWeatherFetchDate!)
+            let isExpired = timeSinceLastFetch >= weatherTimeThreshold
+
+            // Or distance >2 km
+            let distanceSinceLastFetch = lastWeatherLocation?.distance(from: location) ?? weatherDistanceThreshold
+            
+            // request if : First time Or Distance or elapse time 
+            if lastWeatherFetchDate == nil || distanceSinceLastFetch >= weatherDistanceThreshold || isExpired {
+                 self.lastWeatherLocation = location
+                 self.lastWeatherFetchDate = now 
+                 fetchWeatherData(lat: location.coordinate.latitude, lon: location.coordinate.longitude)
+            }
+        }
+
+        // 3. WATCHDOG (end trip detection)
+        if location.speed > 2.0 {
+            self.lastAutomotiveDate = now
+        } else if self.isDriving {
             if let lastAuto = lastAutomotiveDate {
-                let timeSinceLastAuto = Date().timeIntervalSince(lastAuto)
+                let timeSinceLastAuto = now.timeIntervalSince(lastAuto)
                 if timeSinceLastAuto > stopDelay {
                     self.forceStopDriving()
-                    return
+                    return 
                 }
             }
         }
 
-        // --- Save Location ---
+        // 4. Save GPS points if driving speed and accuracy correct
         guard isDriving && location.speed >= 0 && location.horizontalAccuracy <= 20 else { return }
 
-        let newPoint: [String: Any] = [
+        var newPoint: [String: Any] = [
             "type": "location",
             "lat": location.coordinate.latitude,
             "lng": location.coordinate.longitude,
             "speed": location.speed,
             "date": getFormattedDate(),
-            "timestamp": location.timestamp.timeIntervalSince1970 * 1000
+            "timestamp": Int64(location.timestamp.timeIntervalSince1970 * 1000)
         ]
-        
+
+        // add weather from cache (format brief)
+        if let weather = ActivityRecognitionPlugin.lastWeatherCache {
+            newPoint["weather_temp"] = weather["temp"]
+            newPoint["weather_type"] = weather["type"]
+        } else {
+            print("⏳ Weather not yet available for this point")
+        }
+
         saveLocationToJSON(point: newPoint)
         self.notifyListeners("onLocationUpdate", data: newPoint)
     }
+
+   
 
     // Proicess end
     private func forceStopDriving() {
@@ -452,7 +542,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         self.saveLocationToJSON(point: enterData)
         self.notifyListeners("activityChange", data: enterData)
 
-        // 3. reset interna states
+        // 3. reset internal states
         self.isDriving = false
         self.lastAutomotiveDate = nil
         self.lastSavedActivityType = "stationary"
@@ -470,6 +560,9 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
 
         self.processAndUploadAutomotiveTripsOnly()
+
+        self.lastWeatherLocation = nil 
+        self.lastWeatherFetchDate = nil
         
         print("✅ End of driving")
     }
@@ -613,10 +706,22 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     // Upload to server from js
     //
     @objc public func forceUpload(_ call: CAPPluginCall) {
+        // 1. Protect regarding multiple call to sync process
+        guard !syncInProgress else {
+            print("⚠️ Upload in progress request ignored.")
+            call.resolve([
+                "status": "upload_in_progress",
+                "message": "Sync in progress."
+            ])
+            return
+        }
+
         print("📲 Force upload triggered from JS")
-                self.processAndUploadAutomotiveTripsOnly()
         
-        // answer to js
+        // 2. LAunch process as not currently in progress
+        self.processAndUploadAutomotiveTripsOnly()
+        
+        // 3. Send answer to jsJS
         call.resolve([
             "status": "upload_initiated"
         ])
@@ -629,43 +734,48 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         guard !syncInProgress else { return }
         self.syncInProgress = true
 
+        // 1. get all data
         let allEntries = self.getAllStoredLocations()
         guard !allEntries.isEmpty else { 
             self.syncInProgress = false
             return 
         }
 
-        var currentTrip = [[String: Any]]()
-        var finishedAutomotiveTrips = [[[String: Any]]]()
-        var remainingData = [[String: Any]]()
-        let MOTORIZED_SPEED_THRESHOLD = 2.2 // walking threshold
+        try? FileManager.default.removeItem(at: getFilePath())
+        print("🗑️ Fichier local vidé temporairement pour upload")
 
+        var finishedAutomotiveTrips = [[[String: Any]]]()
+        var currentTripSegment = [[String: Any]]()
+        var remainingData = [[String: Any]]()
+        
+        let MOTORIZED_SPEED_THRESHOLD = 2.2 // pedestrian threshold
+
+        // 2. cut by segment automotive
         for entry in allEntries {
-            currentTrip.append(entry)
+            currentTripSegment.append(entry)
             
-            // end segment EXIT automotive
             if let type = entry["type"] as? String, type == "activity",
                let transition = entry["transition"] as? String, transition == "EXIT",
                let activity = entry["activity"] as? String, activity == "automotive" {
                 
-                // --- CLEANING LOGIC ---
-                let cleanedTrip = trimPedestrianStart(trip: currentTrip, speedThreshold: MOTORIZED_SPEED_THRESHOLD)
+                let cleanedTrip = trimPedestrianStart(trip: currentTripSegment, speedThreshold: MOTORIZED_SPEED_THRESHOLD)
                 
-                if (isTripSignificant(trip: cleanedTrip)) {
+                // end automotive trip found
+                if isTripSignificant(trip: cleanedTrip) {
                     finishedAutomotiveTrips.append(cleanedTrip)
-                    print("✅ automotive trip cleaned (Points: \(cleanedTrip.count))")
-                } else {
-                    print("🚶 walking block, ignored.")
                 }
-                
-                currentTrip = [] 
+                currentTripSegment = [] // flush segment for next
             }
         }
+        
+        // no "EXIT automotive" for remaing segment
+        remainingData = currentTripSegment
 
-        // launch upload including remaing data (remaining trip not finished)
-            self.uploadTripsSequentially(tripsToUpload: finishedAutomotiveTrips, remainingData: currentTrip) {
+        // 3. Sequential Upload 
+        
+        self.uploadTripsSequentially(tripsToUpload: finishedAutomotiveTrips, remainingData: remainingData) {
             self.syncInProgress = false
-            print("🏁 Cycle d'upload terminé.")
+            print("🏁 upload finished.")
         }
     }
 
@@ -734,8 +844,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     }
 
     private func isTripSignificant(trip: [[String: Any]]) -> Bool {
-        guard trip.count >= 2 else { return false }
-
+        
         var totalDistance: Double = 0
         var lastLocation: CLLocation?
 
@@ -760,35 +869,66 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
         print("🛣️ Trajet réel: \(Int(totalDistance))m, Durée: \(Int(durationSeconds))s")
 
-        //  > 1000m  and > 60s
-        return (totalDistance > 500 && durationSeconds > 60);
+        //  > 500m  and > 60s
+        let isSignificant = (totalDistance > 500 && durationSeconds > 60)
+        if !isSignificant {
+            print("🗑️ trip ignored as non significant.")
+        }
+        return isSignificant
     }
 
     private func uploadTripsSequentially(tripsToUpload: [[[String: Any]]], remainingData: [[String: Any]], completion: @escaping () -> Void) {
-        var pendingTrips = tripsToUpload
         
-        guard let nextTrip = pendingTrips.first else {
-            // no more trip to send keep only remaining data
-            self.saveRemainingDataOnly(remainingData, otherTrips: [])
-            completion()
-            return
+        var tripsToRetry = [[[String: Any]]]() // keep only those who need a retry
+        var queue = tripsToUpload
+
+        func uploadNext() {
+            guard !queue.isEmpty else {
+                // uploads trys : failed and trip in progress
+                self.finalizeLocalStorage(failedTrips: tripsToRetry, remainingData: remainingData)
+                completion()
+                return
+            }
+
+            let trip = queue.removeFirst()
+            
+            // --- API Upload call ---
+            self.uploadTripToServer(points: trip) { success in
+                if !success {
+                    print("❌ Trip upload failed, keeping in local")
+                    tripsToRetry.append(trip) // retry next time
+                } else {
+                    print("✅ Trip upload success")
+                }
+                uploadNext()
+            }
         }
 
-        self.uploadTripToServer(points: nextTrip) { success in
-            if success {
-                print("✅ trip sent successfully. clean local file...")
-                pendingTrips.removeFirst()
-                
-                // immediat cleaning 
-                // Rewrite file with remaining trips and remaing data (current trip running if exist)
-                self.saveRemainingDataOnly(remainingData, otherTrips: pendingTrips)
-                
-                // next one
-                self.uploadTripsSequentially(tripsToUpload: pendingTrips, remainingData: remainingData, completion: completion)
-            } else {
-                print("❌ Error keep remaining file for later try")
-                completion()
+        uploadNext()
+    }
+
+    private func finalizeLocalStorage(failedTrips: [[[String: Any]]], remainingData: [[String: Any]]) {
+        var dataToKeep = [[String: Any]]()
+        
+        for trip in failedTrips {
+            dataToKeep.append(contentsOf: trip)
+        }
+        dataToKeep.append(contentsOf: remainingData)
+
+        // re-write file
+        let fileURL = getFilePath()
+        
+        if dataToKeep.isEmpty {
+            try? FileManager.default.removeItem(at: fileURL)
+        } else {
+            var jsonlString = ""
+            for point in dataToKeep {
+                if let jsonData = try? JSONSerialization.data(withJSONObject: point),
+                   let jsonString = String(data: jsonData, encoding: .utf8) {
+                    jsonlString += jsonString + "\n"
+                }
             }
+            try? jsonlString.write(to: fileURL, atomically: true, encoding: .utf8)
         }
     }
 
@@ -951,4 +1091,68 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     }
 
 
+    private func fetchWeatherData(lat: Double, lon: Double) {
+        // 1. Fetch only if necessary
+        if let lastFetch = lastWeatherFetchDate, Date().timeIntervalSince(lastFetch) < weatherUpdateInterval {
+            return
+        }
+
+        // 2. Récupération robuste des clés (UserDefaults + Fallback)
+        let apiKey = UserDefaults.standard.string(forKey: "weather_api_key") ?? self.weatherApiKey
+        let baseUrl = UserDefaults.standard.string(forKey: "weather_base_url") ?? self.weatherBaseUrl
+        
+        guard let key = apiKey, let base = baseUrl else {
+            print("❌ iOS Weather config missing")
+            return
+        }
+
+        let urlString = "\(base)?lat=\(lat)&lon=\(lon)&units=metric&appid=\(key)"
+        guard let url = URL(string: urlString) else { return }
+
+        let task = URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+            // 3. Vérification du statut HTTP
+            guard let data = data, error == nil,
+                  let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+                print("❌ iOS Weather API Error or Invalid Status")
+                return 
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    
+                    var brief: [String: Any] = [:]
+                    
+                    // Extraction Température
+                    if let main = json["main"] as? [String: Any], let temperature = main["temp"] as? Double {
+                        brief["temp"] = temperature
+                    }
+
+                    // Extraction Condition
+                    if let weatherArray = json["weather"] as? [[String: Any]],
+                       let first = weatherArray.first,
+                       let conditionId = first["id"] as? Int {
+                        
+                        var condition = "sunny"
+                        switch conditionId {
+                        case 200...299, 900...902: condition = "stormy"
+                        case 300...599: condition = "rainy"
+                        case 600...699: condition = "snowy"
+                        case 700...799: condition = "foggy"
+                        case 800...899: condition = "sunny"
+                        default: condition = "sunny"
+                        }
+                        brief["type"] = condition
+                    }
+
+                    // 4. Mise à jour Cache et Date
+                    ActivityRecognitionPlugin.lastWeatherCache = brief
+                    self?.lastWeatherFetchDate = Date()
+                    print("🌦️ iOS Weather Cache Updated: \(brief)")
+                }
+            } catch {
+                print("❌ iOS Weather Parsing Error")
+            }
+        }
+        task.resume()
+    }
 }

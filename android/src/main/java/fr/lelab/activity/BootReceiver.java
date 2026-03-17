@@ -45,6 +45,10 @@ public class BootReceiver extends BroadcastReceiver {
                         safeContext.startService(serviceIntent);
                     }
                 }
+
+                Log.d("Activity Plugin", "☀️ Weather cycle re-scheduled.");
+                JsonStorageHelper.scheduleNextWeatherUpdate(safeContext);
+                
             } else {
                 Log.d("Activity Plugin", "🛑 Tracking mode de-activated by user, sleep.");
             }

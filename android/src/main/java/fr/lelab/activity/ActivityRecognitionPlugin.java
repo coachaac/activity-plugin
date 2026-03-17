@@ -132,6 +132,10 @@ public class ActivityRecognitionPlugin extends Plugin {
             
             if ("automotive".equals(activityType) && "ENTER".equals(transition)) {
                 instance.isDriving = true;
+
+                Log.d(TAG, "🚗 Automotive ENTER detected: Forcing weather update.");
+                WeatherReceiver.fetchWeatherData(instance.getContext(), true); 
+
                 if (instance.debugMode) instance.triggerVibration(2);
             } else if ("automotive".equals(activityType) && "EXIT".equals(transition)) {
                 if (instance.debugMode) instance.triggerVibration(1);
@@ -189,7 +193,45 @@ public class ActivityRecognitionPlugin extends Plugin {
         SharedPreferences trackPrefs = getContext().getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
         boolean wasTracking = trackPrefs.getBoolean("tracking_active", false);
 
-         if (wasTracking)
+        this.debugMode = call.getBoolean("debug", false);
+        this.isDriving = false;
+
+        String url = call.getString("url");
+        String token = call.getString("groupId");
+
+        String weatherKey = call.getString("weatherAPIkey");
+        String weatherUrl = call.getString("weatherUrl");
+
+        if (url == null || token == null) {
+            // no send to server managed
+            url = "";
+            token = "";
+        }
+
+        Log.d(TAG, "🔍 Debug Config - URL: " + (url != null ? url : "MISSING") + " | Token: " + (token != null ? token : "MISSING"));
+
+        // Persistent saving for server url/token 
+        if (url != null && token != null) {
+            SharedPreferences prefs = getContext().getSharedPreferences("TripPrefs", Context.MODE_PRIVATE);
+            prefs.edit()
+                .putString("server_url", url)
+                .putString("jwt_token", token)
+                .apply();
+            Log.d("SmartPilot", "🌐 Server config saved for background sync");
+        }
+
+        // Save Active state
+        getSafeContext().getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
+            .edit().putBoolean("tracking_active", true).apply();
+
+        // Save weather info
+        SharedPreferences prefs = getContext().getSharedPreferences("tracking_prefs", Context.MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putString("weather_api_key", weatherKey);
+        editor.putString("weather_base_url", weatherUrl);
+        editor.apply();
+
+        if (wasTracking)
         {
             // do not relaunch but say ok as already launched
             call.resolve();
@@ -200,33 +242,6 @@ public class ActivityRecognitionPlugin extends Plugin {
             call.reject("System not ready. Verify permissions and GPS.");
             return;
         }
-        this.debugMode = call.getBoolean("debug", false);
-        this.isDriving = false;
-
-        String url = call.getString("url");
-        String token = call.getString("groupId");
-
-        if (url == null || token == null) {
-            // no send to server managed
-            url = "";
-            token = "";
-        }
-
-        Log.d(TAG, "🔍 Debug Config - URL: " + (url != null ? url : "MISSING") + " | Token: " + (token != null ? token : "MISSING"));
-
-        // Sauvegarde persistante
-        if (url != null && token != null) {
-            SharedPreferences prefs = getContext().getSharedPreferences("TripPrefs", Context.MODE_PRIVATE);
-            prefs.edit()
-                .putString("server_url", url)
-                .putString("jwt_token", token)
-                .apply();
-            Log.d("SmartPilot", "🌐 Server config saved for background sync");
-        }
-
-        // Sauvegarde de l'état "Actif"
-        getSafeContext().getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
-            .edit().putBoolean("tracking_active", true).apply();
 
         implementation.startTracking();
         call.resolve();
@@ -239,6 +254,16 @@ public class ActivityRecognitionPlugin extends Plugin {
         getSafeContext().getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
             .edit().putBoolean("tracking_active", false)
             .putBoolean("driving_state", false).apply();
+
+        // Réinitialisation des filtres météo
+        SharedPreferences prefs = getContext().getSharedPreferences("tracking_prefs", Context.MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.remove("last_weather_lat");
+        editor.remove("last_weather_lon");
+        editor.apply();
+
+        // On arrête aussi les alarmes planifiées
+        JsonStorageHelper.cancelWeatherUpdates(getContext());
 
         implementation.stopTracking();
         call.resolve();

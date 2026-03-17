@@ -11,6 +11,8 @@ export declare class ActivityRecognitionWeb extends WebPlugin implements Activit
         debug?: boolean;
         url?: string;
         groupId?: string;
+        weatherUrl?: string;
+        weatherAPIkey?: string;
     }): Promise<void>;
     stopTracking(): Promise<void>;
     forceUpload(): Promise<{

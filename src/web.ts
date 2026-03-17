@@ -29,7 +29,7 @@ export class ActivityRecognitionWeb extends WebPlugin implements ActivityRecogni
     return;
   }
 
-  async startTracking(_options?: { debug?: boolean, url?: string, groupId?: string }): Promise<void> {
+  async startTracking(_options?: { debug?: boolean, url?: string, groupId?: string, weatherUrl?: string, weatherAPIkey?: string}): Promise<void> {
     console.log('Tracking started on web');
   }
 

@@ -17,28 +17,31 @@ public class LocationReceiver extends BroadcastReceiver {
         LocationResult locationResult = LocationResult.extractResult(intent);
         if (locationResult == null) return;
 
-        // --- Protexted Access (Direct Boot) ---
+        // --- Protected Access (Direct Boot) ---
         Context safeContext = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) 
             ? context.createDeviceProtectedStorageContext() 
             : context;
 
+        // Récupération de l'objet météo en cache (déjà au format JSObject)
+        JSObject currentWeather = JsonStorageHelper.getLastWeather();
+
         for (Location location : locationResult.getLocations()) {
             
-            // 1. Save in JSON file
+            // On appelle saveLocation une seule fois. 
+            // Si currentWeather est null, la méthode saveLocation le gérera proprement.
             JsonStorageHelper.saveLocation(
                 safeContext, 
                 location.getLatitude(), 
                 location.getLongitude(), 
-                location.getSpeed()
+                location.getSpeed(),
+                currentWeather
             );
 
             // 2. Notify plugin (UI Interface)
-            // Note : if App closed ActivityRecognitionPlugin.instance is null
-            // event ignored (as requested).
             JSObject data = JsonStorageHelper.locationToJSObject(location);
             ActivityRecognitionPlugin.onLocationEvent(data);
             
-            Log.d("Poisition", "📍 GPS Point saved : " + location.getLatitude() + "," + location.getLongitude());
+            Log.d("Position", "📍 GPS Point saved : " + location.getLatitude() + "," + location.getLongitude() + (currentWeather != null ? " (with weather)" : ""));
         }
     }
 }
