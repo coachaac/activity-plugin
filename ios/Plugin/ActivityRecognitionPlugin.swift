@@ -734,48 +734,56 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         guard !syncInProgress else { return }
         self.syncInProgress = true
 
-        // 1. get all data
+        // 1. Lire toutes les données SANS supprimer le fichier
         let allEntries = self.getAllStoredLocations()
         guard !allEntries.isEmpty else { 
             self.syncInProgress = false
             return 
         }
 
-        try? FileManager.default.removeItem(at: getFilePath())
-        print("🗑️ Fichier local vidé temporairement pour upload")
-
         var finishedAutomotiveTrips = [[[String: Any]]]()
         var currentTripSegment = [[String: Any]]()
-        var remainingData = [[String: Any]]()
+        var lastProcessedIndex = -1
         
-        let MOTORIZED_SPEED_THRESHOLD = 2.2 // pedestrian threshold
+        let MOTORIZED_SPEED_THRESHOLD = 1.4 // Identique à Android (5km/h approx)
 
-        // 2. cut by segment automotive
-        for entry in allEntries {
+        // 2. Segmentation intelligente
+        for (index, entry) in allEntries.enumerated() {
             currentTripSegment.append(entry)
             
             if let type = entry["type"] as? String, type == "activity",
                let transition = entry["transition"] as? String, transition == "EXIT",
                let activity = entry["activity"] as? String, activity == "automotive" {
                 
-                let cleanedTrip = trimPedestrianStart(trip: currentTripSegment, speedThreshold: MOTORIZED_SPEED_THRESHOLD)
-                
-                // end automotive trip found
-                if isTripSignificant(trip: cleanedTrip) {
-                    finishedAutomotiveTrips.append(cleanedTrip)
+                // CONDITION URBAINE : On vérifie s'il y a au moins 3 points après l'EXIT
+                if index < allEntries.count - 3 {
+                    let cleanedTrip = trimPedestrianStart(trip: currentTripSegment, speedThreshold: MOTORIZED_SPEED_THRESHOLD)
+                    
+                    if isTripSignificant(trip: cleanedTrip) {
+                        finishedAutomotiveTrips.append(cleanedTrip)
+                    }
+                    currentTripSegment = [] // Reset
+                    lastProcessedIndex = index
+                } else {
+                    // Pas assez de recul, on arrête de segmenter pour ce cycle
+                    break
                 }
-                currentTripSegment = [] // flush segment for next
             }
         }
         
-        // no "EXIT automotive" for remaing segment
-        remainingData = currentTripSegment
+        // Ce qui reste : soit le trajet en cours, soit l'EXIT non encore stabilisé
+        var remainingData = [[String: Any]]()
+        if lastProcessedIndex < allEntries.count - 1 {
+            for i in (lastProcessedIndex + 1)..<allEntries.count {
+                remainingData.append(allEntries[i])
+            }
+        }
 
-        // 3. Sequential Upload 
-        
+        // 3. Upload Séquentiel
+        // On passe remainingData pour qu'il soit réécrit à la fin du processus
         self.uploadTripsSequentially(tripsToUpload: finishedAutomotiveTrips, remainingData: remainingData) {
             self.syncInProgress = false
-            print("🏁 upload finished.")
+            print("🏁 Fin du cycle de synchronisation iOS")
         }
     }
 
@@ -910,16 +918,19 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     private func finalizeLocalStorage(failedTrips: [[[String: Any]]], remainingData: [[String: Any]]) {
         var dataToKeep = [[String: Any]]()
         
+        // 1. On remet les trajets qui ont échoué à l'upload
         for trip in failedTrips {
             dataToKeep.append(contentsOf: trip)
         }
+        
+        // 2. On ajoute les points du trajet en cours (ou non stabilisé)
         dataToKeep.append(contentsOf: remainingData)
 
-        // re-write file
         let fileURL = getFilePath()
         
         if dataToKeep.isEmpty {
             try? FileManager.default.removeItem(at: fileURL)
+            print("🗑️ Fichier purgé (tout est envoyé)")
         } else {
             var jsonlString = ""
             for point in dataToKeep {
@@ -928,7 +939,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
                     jsonlString += jsonString + "\n"
                 }
             }
+            // Écriture atomique : Swift écrit dans un fichier temporaire puis remplace l'ancien
+            // C'est très sûr contre les corruptions.
             try? jsonlString.write(to: fileURL, atomically: true, encoding: .utf8)
+            print("💾 Fichier mis à jour : \(dataToKeep.count) points conservés.")
         }
     }
 
