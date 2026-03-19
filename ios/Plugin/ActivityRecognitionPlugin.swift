@@ -29,6 +29,8 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
     private let activityLock = NSLock()
 
+    private let syncLock = NSLock()
+
     // Clés pour le stockage
     private let kIsTrackingActive = "tracking_active"
     private let kIsDrivingState = "driving_state"
@@ -731,47 +733,80 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     // Upload to server
     //
     func processAndUploadAutomotiveTripsOnly() {
-        guard !syncInProgress else { return }
-        self.syncInProgress = true
+        syncLock.lock()
+        if syncInProgress {
+            syncLock.unlock()
+            return
+        }
+        syncInProgress = true
+        syncLock.unlock()
 
-        // 1. Lire toutes les données SANS supprimer le fichier
         let allEntries = self.getAllStoredLocations()
         guard !allEntries.isEmpty else { 
             self.syncInProgress = false
             return 
         }
 
-        var finishedAutomotiveTrips = [[[String: Any]]]()
-        var currentTripSegment = [[String: Any]]()
+        var finishedTrips = [[[String: Any]]]()
+        var currentSegment = [[String: Any]]()
+        var isInsideAutomotive = false
         var lastProcessedIndex = -1
         
-        let MOTORIZED_SPEED_THRESHOLD = 1.4 // Identique à Android (5km/h approx)
+        let GRACE_TIMER_MS: Double = 3 * 60 * 1000 // 3 minutes
+        let SPEED_THRESHOLD = 1.7 // ~6 km/h (Vitesse plancher pour maintien)
 
-        // 2. Segmentation intelligente
         for (index, entry) in allEntries.enumerated() {
-            currentTripSegment.append(entry)
+            let type = entry["type"] as? String ?? ""
+            let activity = entry["activity"] as? String ?? ""
+            let transition = entry["transition"] as? String ?? ""
+            let timestamp = entry["timestamp"] as? Double ?? 0
+            let speed = entry["speed"] as? Double ?? 0
+
+            // --- DÉTECTION DU DÉBUT (ENTER) ---
+            if type == "activity" && activity == "automotive" && transition == "ENTER" {
+                isInsideAutomotive = true
+            }
+
+            if isInsideAutomotive {
+                currentSegment.append(entry)
+            }
+
+            // --- DÉTECTION DE LA FIN (EXIT ou GRACE TIMER) ---
+            var shouldCloseTrip = false
             
-            if let type = entry["type"] as? String, type == "activity",
-               let transition = entry["transition"] as? String, transition == "EXIT",
-               let activity = entry["activity"] as? String, activity == "automotive" {
+            // Cas 1 : EXIT explicite
+            if type == "activity" && activity == "automotive" && transition == "EXIT" {
+                shouldCloseTrip = true
+            } 
+            // Cas 2 : Grace Timer (On regarde le point suivant s'il existe)
+            else if isInsideAutomotive && index < allEntries.count - 1 {
+                let nextEntry = allEntries[index + 1]
+                let nextTimestamp = nextEntry["timestamp"] as? Double ?? 0
+                let gap = nextTimestamp - timestamp
                 
-                // CONDITION URBAINE : On vérifie s'il y a au moins 3 points après l'EXIT
-                if index < allEntries.count - 3 {
-                    let cleanedTrip = trimPedestrianStart(trip: currentTripSegment, speedThreshold: MOTORIZED_SPEED_THRESHOLD)
-                    
-                    if isTripSignificant(trip: cleanedTrip) {
-                        finishedAutomotiveTrips.append(cleanedTrip)
-                    }
-                    currentTripSegment = [] // Reset
-                    lastProcessedIndex = index
-                } else {
-                    // Pas assez de recul, on arrête de segmenter pour ce cycle
-                    break
+                // Si le trou est > 3 min ET que la vitesse actuelle est faible
+                if gap > GRACE_TIMER_MS && speed < SPEED_THRESHOLD {
+                    shouldCloseTrip = true
                 }
             }
+
+            if shouldCloseTrip && !currentSegment.isEmpty {
+                // Nettoyage et Validation (Nettoie la marche avant/après)
+                var cleaned = trimPedestrianStart(currentSegment, speedThreshold: SPEED_THRESHOLD)
+                cleaned = trimPedestrianEnd(cleaned, speedThreshold: SPEED_THRESHOLD)
+
+                if isTripSignificant(trip: cleaned) {
+                    finishedTrips.append(cleaned)
+                }
+
+                // Reset pour le prochain trajet
+                currentSegment = []
+                isInsideAutomotive = false
+                lastProcessedIndex = index
+            }
         }
-        
-        // Ce qui reste : soit le trajet en cours, soit l'EXIT non encore stabilisé
+
+        // --- GESTION DES RÉSIDUS ---
         var remainingData = [[String: Any]]()
         if lastProcessedIndex < allEntries.count - 1 {
             for i in (lastProcessedIndex + 1)..<allEntries.count {
@@ -779,13 +814,67 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             }
         }
 
-        // 3. Upload Séquentiel
-        // On passe remainingData pour qu'il soit réécrit à la fin du processus
-        self.uploadTripsSequentially(tripsToUpload: finishedAutomotiveTrips, remainingData: remainingData) {
+        // Upload
+        self.uploadTripsSequentially(tripsToUpload: finishedTrips, remainingData: remainingData) {
+            self.syncLock.lock()
             self.syncInProgress = false
-            print("🏁 Fin du cycle de synchronisation iOS")
+            self.syncLock.unlock()
         }
     }
+
+
+    private func trimPedestrianStart(_ trip: [[String: Any]], speedThreshold: Double) -> [[String: Any]] {
+        var firstMotorizedIndex = -1
+
+        // Find the first point where we are actually moving or in automotive mode
+        for (index, step) in trip.enumerated() {
+            let activity = step["activity"] as? String ?? ""
+            let speed = step["speed"] as? Double ?? 0.0
+            let type = step["type"] as? String ?? ""
+
+            let isAutomotive = activity == "automotive"
+            let isFast = type == "location" && speed > speedThreshold
+
+            if isAutomotive || isFast {
+                firstMotorizedIndex = index
+                break
+            }
+        }
+
+        if firstMotorizedIndex != -1 {
+            // We take from the motorized point (back up 1 for start context if possible)
+            let n_rec = 0
+            let startIndex = max(0, firstMotorizedIndex - n_rec)
+            return Array(trip[startIndex..<trip.count])
+        }
+        
+        return [] // Nothing motorized found
+    }
+
+    private func trimPedestrianEnd(_ trip: [[String: Any]], speedThreshold: Double) -> [[String: Any]] {
+        var lastMotorizedIndex = -1
+
+        // Reverse search from the end
+        for (index, step) in trip.enumerated().reversed() {
+            let activity = step["activity"] as? String ?? ""
+            let speed = step["speed"] as? Double ?? 0.0
+            let type = step["type"] as? String ?? ""
+
+            if activity == "automotive" || (type == "location" && speed > speedThreshold) {
+                lastMotorizedIndex = index
+                break
+            }
+        }
+
+        if lastMotorizedIndex != -1 {
+            let endIndex = min(trip.count, lastMotorizedIndex + 2)
+            return Array(trip[0..<endIndex])
+        }
+        
+        return trip
+    }
+
+   
 
     private func saveRemainingDataOnly(_ currentTrip: [[String: Any]], otherTrips: [[[String: Any]]]) {
 
@@ -826,30 +915,6 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
     }
 
-
-    private func trimPedestrianStart(trip: [[String: Any]], speedThreshold: Double) -> [[String: Any]] {
-        var firstMotorizedIndex: Int? = nil
-
-        // 1. Trouver l'index du premier point motorisé
-        for (index, step) in trip.enumerated() {
-            let isAutomotive = (step["activity"] as? String) == "automotive"
-            let speed = step["speed"] as? Double ?? 0.0
-            let isFast = (step["type"] as? String) == "location" && speed > speedThreshold
-
-            if isAutomotive || isFast {
-                firstMotorizedIndex = index
-                break
-            }
-        }
-
-        // 2. Si trouvé, on garde tout à partir de cet index (ou un point avant pour le contexte)
-        if let startIndex = firstMotorizedIndex {
-            let actualStart = max(0, startIndex - 1)
-            return Array(trip[actualStart..<trip.count])
-        }
-
-        return [] // Retourne vide si aucune activité moteur n'est trouvée
-    }
 
     private func isTripSignificant(trip: [[String: Any]]) -> Bool {
         

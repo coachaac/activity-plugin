@@ -1,32 +1,36 @@
 package fr.lelab.activity;
 
-import android.content.Context;
-import android.os.Build;
-import android.util.Log;
 import android.app.AlarmManager;
 import android.app.PendingIntent;
+import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
+import android.util.Log;
+
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
+
+import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.BufferedOutputStream;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Locale;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
 import java.util.List;
-import java.util.Iterator;
-import org.json.JSONObject;
-import org.json.JSONArray;
+import java.util.Locale;
 import java.util.Scanner;
 
 public class JsonStorageHelper {
@@ -136,8 +140,9 @@ public class JsonStorageHelper {
         }
     }
 
+    private static final SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss", Locale.FRANCE);
+
     private static String getFormattedDate() {
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
         return sdf.format(new Date());
     }
 
@@ -191,7 +196,7 @@ public class JsonStorageHelper {
                     tempFile.renameTo(file);
                 }
             } else {
-                // nothing remain supprress all
+                // nothing remain suppress all
                 file.delete();
                 tempFile.delete();
             }
@@ -242,7 +247,7 @@ public class JsonStorageHelper {
             } else {
                 tempFile.delete();
             }
-            Log.d(TAG, "🧹 Purge betwwen " + from + " and " + to + " ended.");
+            Log.d(TAG, "🧹 Purge between " + from + " and " + to + " ended.");
         }
     }
 
@@ -250,6 +255,7 @@ public class JsonStorageHelper {
     /**
      * Analyse le fichier, segmente les trajets terminés (EXIT) et les envoie.
      */
+ 
     public static void processAndUploadAutomotiveTrips(Context context, String serverUrl, String token) {
         synchronized (ActivityRecognitionPlugin.fileLock) {
             if (syncInProgress) return;
@@ -262,107 +268,134 @@ public class JsonStorageHelper {
                     return;
                 }
 
-                List<JSArray> completedTrips = new ArrayList<>();
+                // 1. Tri des données par timestamp
+                List<JSONObject> entryList = new ArrayList<>();
+                for (int i = 0; i < allEntries.length(); i++) {
+                    entryList.add(allEntries.getJSONObject(i));
+                }
+                Collections.sort(entryList, (a, b) -> Long.compare(a.optLong("timestamp"), b.optLong("timestamp")));
+
+                // Réassignation pour le traitement
+                allEntries = new JSArray();
+                for (JSONObject obj : entryList) {
+                    allEntries.put(obj);
+                }
+
+                // 2. Segmentation des trajets
+                List<JSArray> finishedTrips = new ArrayList<>();
                 JSArray currentSegment = new JSArray();
+                boolean isInsideAutomotive = false;
                 int lastProcessedIndex = -1;
 
-                // 1. Segmentation avec "Look-ahead"
-                // On ne valide un EXIT que s'il y a des points après (stabilisation)
+                long GRACE_TIMER_MS = 3 * 60 * 1000; // 3 minutes
+                double SPEED_THRESHOLD = 1.7;        // ~6-8 km/h
+
                 for (int i = 0; i < allEntries.length(); i++) {
-                    JSObject entry = JSObject.fromJSONObject(allEntries.getJSONObject(i));
-                    currentSegment.put(entry);
+                    JSONObject entry = allEntries.getJSONObject(i);
+                    String type = entry.optString("type", "");
+                    String activity = entry.optString("activity", "");
+                    String transition = entry.optString("transition", "");
+                    long timestamp = entry.optLong("timestamp", 0);
+                    double speed = entry.optDouble("speed", 0);
 
-                    boolean isExit = "activity".equals(entry.optString("type")) && 
-                                     "EXIT".equals(entry.optString("transition")) && 
-                                     "automotive".equals(entry.optString("activity"));
+                    if ("activity".equals(type) && "automotive".equals(activity) && "ENTER".equals(transition)) {
+                        isInsideAutomotive = true;
+                    }
 
-                    if (isExit) {
-                        // On vérifie s'il y a au moins 3 points après l'EXIT pour confirmer la fin
-                        if (i < allEntries.length() - 3) {
-                            JSArray cleaned = trimPedestrianStart(currentSegment, 1.4);
-                            if (isTripSignificant(cleaned)) {
-                                completedTrips.add(cleaned);
-                            }
-                            currentSegment = new JSArray(); // Reset pour le prochain trajet
-                            lastProcessedIndex = i; // On marque jusqu'où on a traité
-                        } else {
-                            // Pas assez de recul, on s'arrête là pour ce cycle
-                            break; 
+                    if (isInsideAutomotive) {
+                        currentSegment.put(entry);
+                    }
+
+                    boolean shouldCloseTrip = false;
+                    if ("activity".equals(type) && "automotive".equals(activity) && "EXIT".equals(transition)) {
+                        shouldCloseTrip = true;
+                    } else if (isInsideAutomotive && i < allEntries.length() - 1) {
+                        JSONObject nextEntry = allEntries.getJSONObject(i + 1);
+                        long gap = nextEntry.optLong("timestamp", 0) - timestamp;
+                        if (gap > GRACE_TIMER_MS && speed < SPEED_THRESHOLD) {
+                            shouldCloseTrip = true;
                         }
                     }
-                }
 
-                // 2. Upload des trajets complétés
-                List<JSArray> failedUploads = new ArrayList<>();
-                for (JSArray trip : completedTrips) {
-                    if (!uploadSingleTrip(serverUrl, token, trip)) {
-                        failedUploads.add(trip); // On garde en mémoire les échecs réseau
+                    if (shouldCloseTrip && currentSegment.length() > 0) {
+                        JSArray cleaned = trimPedestrianStart(currentSegment, SPEED_THRESHOLD);
+                        cleaned = trimPedestrianEnd(cleaned, SPEED_THRESHOLD);
+
+                        if (isTripSignificant(cleaned)) {
+                            finishedTrips.add(cleaned);
+                        }
+                        currentSegment = new JSArray();
+                        isInsideAutomotive = false;
+                        lastProcessedIndex = i; // On marque jusqu'où on a "consommé"
                     }
                 }
 
-                // 3. Reconstruction des données restantes à sauvegarder
-                // On veut garder : les échecs d'upload + tout ce qui n'a pas été segmenté
+                // 3. Tentative d'Upload et gestion des échecs
+                List<JSArray> failedTrips = new ArrayList<>();
+                for (JSArray trip : finishedTrips) {
+                    boolean success = uploadSingleTrip(serverUrl, token, trip);
+                    if (!success) {
+                        Log.w(TAG, "⚠️ Échec upload d'un trajet, sera conservé pour plus tard.");
+                        failedTrips.add(trip);
+                    }
+                }
+
+                // 4. Reconstruction du fichier avec les données à conserver
                 JSArray dataToKeep = new JSArray();
 
-                // Ajouter les trajets qui ont échoué à l'upload
-                for (JSArray failed : failedUploads) {
+                // A. On remet les trajets qui ont échoué
+                for (JSArray failed : failedTrips) {
                     for (int j = 0; j < failed.length(); j++) {
                         dataToKeep.put(failed.get(j));
                     }
                 }
 
-                // Ajouter tout ce qui se trouve après le dernier EXIT validé
+                // B. On ajoute tout ce qui n'a pas été traité (trajet en cours ou data post-segmentation)
                 for (int k = lastProcessedIndex + 1; k < allEntries.length(); k++) {
                     dataToKeep.put(allEntries.get(k));
                 }
 
-                // 4. RÉÉCRITURE UNIQUE ET FINALE
-                // On passe une liste vide en 3ème paramètre car dataToKeep contient déjà tout
-                rewriteFileWithRemainingData(context, dataToKeep, new ArrayList<>());
+                // Réécriture physique du fichier
+                rewriteFileWithRemainingData(context, dataToKeep);
 
             } catch (Exception e) {
-                Log.e(TAG, "❌ Erreur critique de traitement", e);
+                Log.e(TAG, "❌ Erreur durant le traitement : ", e);
             } finally {
                 syncInProgress = false;
             }
         }
     }
 
-    // exclude small trips
-    private static boolean isTripSignificant(JSArray trip) {
-        if (trip.length() < 5) return false;
+    private static JSArray trimPedestrianStart(JSArray trip, double speedThreshold) throws JSONException {
+        int firstMotorizedIndex = -1;
 
-        double totalDistance = 0;
-        long durationSeconds = 0;
+        // On cherche le premier point où l'on roule vraiment
+        for (int i = 0; i < trip.length(); i++) {
+            JSONObject step = trip.getJSONObject(i);
+            String activity = step.optString("activity", "");
+            double speed = step.optDouble("speed", 0.0);
+            String type = step.optString("type", "");
 
-        try {
-            // 1. Calcul de la distance cumulée
-            for (int i = 0; i < trip.length() - 1; i++) {
-                JSObject p1 = JSObject.fromJSONObject(trip.getJSONObject(i));
-                JSObject p2 = JSObject.fromJSONObject(trip.getJSONObject(i + 1));
+            boolean isAutomotive = "automotive".equals(activity);
+            boolean isFast = "location".equals(type) && speed > speedThreshold;
 
-                // On ne calcule la distance que si ce sont des points de type location
-                if ("location".equals(p1.optString("type")) && "location".equals(p2.optString("type"))) {
-                    totalDistance += calculateDistance(
-                        p1.getDouble("lat"), p1.getDouble("lng"),
-                        p2.getDouble("lat"), p2.getDouble("lng")
-                    );
-                }
+            if (isAutomotive || isFast) {
+                firstMotorizedIndex = i;
+                break;
             }
-
-            // 2. Calcul de la durée totale
-            JSObject first = JSObject.fromJSONObject(trip.getJSONObject(0));
-            JSObject last = JSObject.fromJSONObject(trip.getJSONObject(trip.length() - 1));
-            durationSeconds = (last.getLong("timestamp") - first.getLong("timestamp")) / 1000;
-
-            Log.d("TripValidation", "Route réelle: " + totalDistance + "m en " + durationSeconds + "s");
-
-            // > 500m and > 60s
-            return (totalDistance > 350 && durationSeconds > 45);
-
-        } catch (JSONException e) {
-            return false;
         }
+
+        if (firstMotorizedIndex != -1) {
+            JSArray cleaned = new JSArray();
+            // start from motorized point (goback n_rec if start context needed)
+            int n_rec = 0; // set n to zero
+            int startIndex = Math.max(0, firstMotorizedIndex - n_rec);
+            for (int i = startIndex; i < trip.length(); i++) {
+                cleaned.put(trip.get(i));
+            }
+            return cleaned;
+        }
+        return new JSArray(); // Si rien de moteur n'est trouvé, on vide
     }
 
     private static double calculateDistance(double lat1, double lon1, double lat2, double lon2) {
@@ -380,38 +413,71 @@ public class JsonStorageHelper {
         return R * c;
     }
 
+
+    private static boolean isTripSignificant(JSArray trip) throws JSONException {
+        if (trip.length() < 5) return false;
+
+        double totalDistance = 0;
+        JSONObject lastLoc = null;
+
+        for (int i = 0; i < trip.length(); i++) {
+            JSONObject step = trip.getJSONObject(i);
+            if ("location".equals(step.optString("type"))) {
+                if (lastLoc != null) {
+                    totalDistance += calculateDistance(
+                        lastLoc.optDouble("lat"), lastLoc.optDouble("lng"),
+                        step.optDouble("lat"), step.optDouble("lng")
+                    );
+                }
+                lastLoc = step;
+            }
+        }
+
+        long startTime = trip.getJSONObject(0).optLong("timestamp", 0);
+        long endTime = trip.getJSONObject(trip.length() - 1).optLong("timestamp", 0);
+        long durationSeconds = (endTime - startTime) / 1000;
+
+        double averageSpeedMS = durationSeconds > 0 ? (totalDistance / durationSeconds) : 0;
+
+        Log.d(TAG, "📊 Analyse trajet: " + (int)totalDistance + "m, " + durationSeconds + "s, Moy: " + String.format("%.2f", averageSpeedMS) + "m/s");
+
+        // SEUILS : > 500m ET > 60s ET vitesse moyenne > 7km/h (2.0 m/s)
+        boolean significant = (totalDistance > 500 && durationSeconds > 60 && averageSpeedMS > 2.0);
+        
+        if (!significant) Log.d(TAG, "🗑️ Trajet ignoré (trop court ou trop lent)");
+        
+        return significant;
+    }
+
     /**
      * Parcourt le segment et supprime tous les points au début 
      * tant qu'on n'a pas détecté de mouvement motorisé.
      */
-    private static JSArray trimPedestrianStart(JSArray trip, double speedThreshold) throws JSONException {
-        JSArray cleaned = new JSArray();
-        int firstMotorizedIndex = -1;
+    private static JSArray trimPedestrianEnd(JSArray trip, double speedThreshold) throws JSONException {
+        int lastMotorizedIndex = -1;
 
-        // 1. Trouver l'index du premier déclencheur "voiture"
-        for (int i = 0; i < trip.length(); i++) {
-            JSObject step = JSObject.fromJSONObject(trip.getJSONObject(i));
-            
-            boolean isAutomotiveType = "automotive".equals(step.optString("activity"));
-            boolean isFast = "location".equals(step.optString("type")) && step.optDouble("speed", 0) > speedThreshold;
+        // On remonte depuis la fin
+        for (int i = trip.length() - 1; i >= 0; i--) {
+            JSONObject step = trip.getJSONObject(i);
+            String activity = step.optString("activity", "");
+            double speed = step.optDouble("speed", 0.0);
+            String type = step.optString("type", "");
 
-            if (isAutomotiveType || isFast) {
-                firstMotorizedIndex = i;
+            if ("automotive".equals(activity) || ("location".equals(type) && speed > speedThreshold)) {
+                lastMotorizedIndex = i;
                 break;
             }
         }
 
-        // 2. Si on a trouvé un début motorisé, on garde tout à partir de là
-        if (firstMotorizedIndex != -1) {
-            // Optionnal : we can go back from some point 1, 2 or 3 to get points just before start 
-            int pointBefore = 3; // here 3 points
-            int startIndex = Math.max(0, firstMotorizedIndex - pointBefore); 
-            for (int i = startIndex; i < trip.length(); i++) {
+        if (lastMotorizedIndex != -1) {
+            JSArray cleaned = new JSArray();
+            int endIndex = Math.min(trip.length(), lastMotorizedIndex + 2);
+            for (int i = 0; i < endIndex; i++) {
                 cleaned.put(trip.get(i));
             }
+            return cleaned;
         }
-
-        return cleaned;
+        return trip;
     }
 
     /**
@@ -498,35 +564,20 @@ public class JsonStorageHelper {
     /**
      * rewrite file keeping remaining data
      */
-    private static void rewriteFileWithRemainingData(Context context, JSArray currentTrip, List<JSArray> remainingTrips) {
+    private static void rewriteFileWithRemainingData(Context context, JSArray dataToKeep) {
         File file = new File(getSafeFilesDir(context), FILE_NAME);
-        
-        // On utilise un BufferedOutputStream pour plus d'efficacité
+        // Utilisation du mode écrasement (false)
         try (FileOutputStream fos = new FileOutputStream(file, false);
              BufferedOutputStream bos = new BufferedOutputStream(fos)) {
             
-            // 1. Réécrire les trajets segmentés qui n'ont pas encore été envoyés (échecs d'upload)
-            if (remainingTrips != null) {
-                for (JSArray trip : remainingTrips) {
-                    for (int i = 0; i < trip.length(); i++) {
-                        String line = trip.getJSONObject(i).toString() + "\n";
-                        bos.write(line.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                    }
-                }
+            for (int i = 0; i < dataToKeep.length(); i++) {
+                String line = dataToKeep.getJSONObject(i).toString() + "\n";
+                bos.write(line.getBytes(StandardCharsets.UTF_8));
             }
-            
-            // 2. Réécrire les points du trajet actuel (ceux après le dernier EXIT validé)
-            if (currentTrip != null) {
-                for (int i = 0; i < currentTrip.length(); i++) {
-                    String line = currentTrip.getJSONObject(i).toString() + "\n";
-                    bos.write(line.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                }
-            }
-            
             bos.flush();
-            Log.d(TAG, "💾 Fichier réécrit avec succès. Données conservées pour le prochain cycle.");
+            Log.d(TAG, "💾 File updated: " + dataToKeep.length() + " entries kept.");
         } catch (Exception e) {
-            Log.e(TAG, "❌ Erreur critique lors de la réécriture du fichier: " + e.getMessage());
+            Log.e(TAG, "❌ Critical rewrite error: " + e.getMessage());
         }
     }
 
@@ -579,46 +630,31 @@ public class JsonStorageHelper {
     // save last json weather received
     // 
     public static void setLastWeather(JSObject weatherData) {
-        // 1. Créer un NOUVEL objet immédiatement (pour éviter le NullPointerException)
         JSObject weatherBrief = new JSObject();
-        
+        // Valeurs par défaut
+        String condition = "unknown";
+        double temperature = -999.0;
+
         try {
-            if (weatherData != null && weatherData.has("weather")) {
-                JSONArray weatherArray = weatherData.getJSONArray("weather");
-                JSONObject firstWeather = weatherArray.getJSONObject(0);
-                int weatherCondition = firstWeather.getInt("id");
-                
-                JSONObject mainObj = weatherData.getJSONObject("main");
-                double temperature = mainObj.getDouble("temp");
+            if (weatherData != null && weatherData.has("weather") && weatherData.has("main")) {
+                int weatherCondition = weatherData.getJSONArray("weather").getJSONObject(0).getInt("id");
+                temperature = weatherData.getJSONObject("main").getDouble("temp");
 
-                String condition = "sunny"; // Valeur par défaut
-
-                if ((weatherCondition >= 200 && weatherCondition < 300) || (weatherCondition >= 900 && weatherCondition < 903))
-                    condition = "stormy";
-                else if ((weatherCondition >= 300 && weatherCondition < 400) || (weatherCondition >= 500 && weatherCondition < 600))
-                    condition = "rainy";
-                else if (weatherCondition >= 600 && weatherCondition < 700)
-                    condition = "snowy";
-                else if (weatherCondition >= 700 && weatherCondition < 800)
-                    condition = "foggy";
-                else if (weatherCondition >= 800 && weatherCondition < 900)
-                    condition = "sunny";
-
-                weatherBrief.put("type", condition);
-                weatherBrief.put("temp", temperature);
-            } else {
-                weatherBrief.put("type", "unknown");
-                weatherBrief.put("temp", -999);
+                if (weatherCondition >= 200 && weatherCondition < 300) condition = "stormy";
+                else if (weatherCondition >= 300 && weatherCondition < 600) condition = "rainy";
+                else if (weatherCondition >= 600 && weatherCondition < 700) condition = "snowy";
+                else if (weatherCondition >= 700 && weatherCondition < 800) condition = "foggy";
+                else if (weatherCondition >= 800 && weatherCondition < 900) {
+                    condition = (weatherCondition == 800) ? "sunny" : "cloudy";
+                }
             }
         } catch (Exception e) {
-            e.printStackTrace();
-            weatherBrief.put("type", "unknown");
-            weatherBrief.put("temp", -999);
+            Log.e(TAG, "Error parsing weather", e);
         }
 
-        // 2. Assigner l'objet local rempli à la variable statique de la classe
-        lastWeather = weatherBrief; 
-        Log.d("JsonStorageHelper", "☀️ Météo updated in cache : " + lastWeather.toString());
+        weatherBrief.put("type", condition);
+        weatherBrief.put("temp", temperature);
+        lastWeather = weatherBrief;
     }
 
     //
