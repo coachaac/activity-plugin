@@ -83,10 +83,42 @@ public class JsonStorageHelper {
         }
     }
 
+
+    /**
+     * Sauvegarde d'un log file 
+     */
+    public static void logToFile(Context context, String message) {
+        File logFile = new File(getSafeFilesDir(context), "debug_log.txt");
+        
+        // --- Auto-vide : Si le fichier dépasse 1 Mo (1024 * 1024 octets) ---
+        if (logFile.exists() && logFile.length() > 1024 * 1024) {
+            logFile.delete(); 
+            // On recrée le fichier avec une petite note
+            try (FileOutputStream fos = new FileOutputStream(logFile)) {
+                fos.write("--- Log reset (Taille max atteinte) ---\n".getBytes());
+            } catch (IOException ignored) {}
+        }
+
+        String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.FRANCE).format(new Date());
+        String entry = timestamp + " : " + message + "\n";
+        
+        try (FileOutputStream fos = new FileOutputStream(logFile, true)) {
+            fos.write(entry.getBytes());
+        } catch (IOException e) {
+            Log.e("DEBUG", "Error writing to debug log", e);
+        }
+    }
+
     /**
      * Sauvegarde un changement d'activité
      */
     public static void saveActivity(Context context, String activityName, String transitionName) {
+        
+        // log during debug TO BE REMOVED START
+        String logString = "Activitée reçue: " + activityName + " transition: " +transitionName;
+        logToFile(context, logString);
+        // log during debug TO BE REMOVED END
+
         synchronized (ActivityRecognitionPlugin.fileLock) {
             File file = new File(getSafeFilesDir(context), FILE_NAME);
             
