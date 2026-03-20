@@ -121,7 +121,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             print("⏳ Red light or small stop or walking (for small stop): stationary saved, GPS remains.")
             // save stationary ENTER but keep isDriving
             let data = formatActivityData(type: "stationary", transition: "ENTER")
-            saveLocationToJSON(point: data)
+            saveLocationToJSON(data)
             self.notifyListeners("activityChange", data: data)
             
             self.lastSavedActivityType = currentType
@@ -155,13 +155,13 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         // 4. TRANSITION  (EXIT OLD / ENTER NEW)
         if let old = self.lastSavedActivityType {
             let exitData = formatActivityData(type: old, transition: "EXIT")
-            saveLocationToJSON(point: exitData)
+            saveLocationToJSON(exitData)
             self.notifyListeners("activityChange", data: exitData)
         }
 
         self.lastSavedActivityType = currentType
         let enterData = formatActivityData(type: currentType, transition: "ENTER")
-        saveLocationToJSON(point: enterData)
+        saveLocationToJSON(enterData)
         self.notifyListeners("activityChange", data: enterData)
     }
 
@@ -195,7 +195,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
                 ]
                 
                 print("📍 save restored point (\(location.timestamp))")
-                saveLocationToJSON(point: backfillPoint)
+                saveLocationToJSON(backfillPoint)
             }
         }
     }
@@ -458,7 +458,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
                 
                 // Log de l'événement ENTER pour le trajet
                 let enterData = formatActivityData(type: "automotive", transition: "ENTER")
-                saveLocationToJSON(point: enterData)
+                saveLocationToJSON(enterData)
                 self.notifyListeners("activityChange", data: enterData)
                 
                 startHighPrecisionGPS()
@@ -516,7 +516,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             print("⏳ Weather not yet available for this point")
         }
 
-        saveLocationToJSON(point: newPoint)
+        saveLocationToJSON(newPoint)
         self.notifyListeners("onLocationUpdate", data: newPoint)
     }
 
@@ -537,11 +537,11 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
         // 1. Set automotive EXIT
         let exitData = formatActivityData(type: "automotive", transition: "EXIT")
-        self.saveLocationToJSON(point: exitData)
+        self.saveLocationToJSON(exitData)
         
         // 2. Start stationnary
         let enterData = formatActivityData(type: "stationary", transition: "ENTER")
-        self.saveLocationToJSON(point: enterData)
+        self.saveLocationToJSON(enterData)
 
         // 3. update states
         self.lastAutomotiveDate = nil
@@ -567,32 +567,34 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     }
 
     // MARK: - Saving & JSON
-    private func saveLocationToJSON(point: [String: Any]) {
-        let url = getFilePath()
+    private func saveLocationToJSON(_ locationData: [String: Any]) {
+        let fileURL = getFilePath()
         
-        // 1. Conversion en JSONL (une ligne par objet)
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: point),
-              var lineData = (String(data: jsonData, encoding: .utf8)? + "\n")?.data(using: .utf8) else { 
-            return 
+        // 1. Sérialisation en Data (Binaire)
+        guard var jsonData = try? JSONSerialization.data(withJSONObject: locationData, options: []) else {
+            print("❌ Erreur de sérialisation pour le point GPS")
+            return
         }
+        
+        // 2. Ajout du saut de ligne (\n) directement en binaire (0x0A)
+        jsonData.append(0x0A)
 
-        if !FileManager.default.fileExists(atPath: url.path) {
-            // 2. CRITIQUE : Créer le fichier avec la permission de lecture/écriture APRÈS le premier boot
-            // Cela permet au plugin d'écrire même si le téléphone est verrouillé (après un reboot).
-            let attributes = [FileAttributeKey.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
-            FileManager.default.createFile(atPath: url.path, contents: lineData, attributes: attributes)
-            print("📁 Fichier créé avec protection 'UntilFirstAuth'")
-        } else {
-            // 3. Append efficace
-            do {
-                let fileHandle = try FileHandle(forWritingTo: url)
-                defer { fileHandle.closeFile() } // Sécurité pour fermer le handle quoi qu'il arrive
+        // 3. Écriture physique sur le disque
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            // Le fichier existe, on ouvre un "FileHandle" pour ajouter à la fin (Append)
+            if let fileHandle = try? FileHandle(forWritingTo: fileURL) {
                 fileHandle.seekToEndOfFile()
-                fileHandle.write(lineData)
+                fileHandle.write(jsonData)
+                fileHandle.closeFile()
+            } else {
+                print("❌ Impossible d'ouvrir le fichier pour ajout")
+            }
+        } else {
+            // Premier point : on crée le fichier avec une écriture atomique pour la sécurité
+            do {
+                try jsonData.write(to: fileURL, options: .atomic)
             } catch {
-                print("❌ Erreur écriture fichier: \(error)")
-                // Optionnel : Tentative de secours si le handle échoue (protection lock)
-                try? lineData.write(to: url, options: .atomic)
+                print("❌ Erreur lors de la création du fichier : \(error)")
             }
         }
     }
@@ -884,45 +886,6 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
    
 
-    private func saveRemainingDataOnly(_ currentTrip: [[String: Any]], otherTrips: [[[String: Any]]]) {
-
-        let fileURL = getFilePath()
-        
-        // aggregate all remaining data 
-        var allPointsToKeep = [[String: Any]]()
-        
-        // 1. add trip not already uploaded
-        for trip in otherTrips {
-            allPointsToKeep.append(contentsOf: trip)
-        }
-        
-        // 2. Add current trip (no EXIT yet)
-        allPointsToKeep.append(contentsOf: currentTrip)
-
-        if allPointsToKeep.isEmpty {
-            try? FileManager.default.removeItem(at: fileURL)
-            return
-        }
-
-        var jsonlString = ""
-
-        // Rewrite JSONL 
-        for point in allPointsToKeep {
-            if let jsonData = try? JSONSerialization.data(withJSONObject: point, options: []),
-               let jsonString = String(data: jsonData, encoding: .utf8) {
-                jsonlString += jsonString + "\n"
-            }
-        }
-
-        do {
-            // atomic write to prevent corrupted file true, encoding: .utf8)
-            try jsonlString.write(to: fileURL, atomically: true, encoding: .utf8)
-            print("💾 local file updated : \(allPointsToKeep.count) remaing points.")
-        } catch {
-            print("❌ Error while writting file : \(error)")
-        }
-    }
-
 
     private func isTripSignificant(trip: [[String: Any]]) -> Bool {
         
@@ -1002,14 +965,23 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         stream.open()
         defer { stream.close() }
 
+        let lineBreak = UInt8(0x0A) // Le caractère '\n' en binaire
+
         for point in dataToKeep {
-            if let jsonData = try? JSONSerialization.data(withJSONObject: point),
-               let jsonString = (String(data: jsonData, encoding: .utf8)? + "\n"),
-               let data = jsonString.data(using: .utf8) {
+            // 1. On transforme le dictionnaire en Data
+            if var jsonData = try? JSONSerialization.data(withJSONObject: point, options: []) {
                 
-                _ = data.withUnsafeBytes { stream.write($0.bindMemory(to: UInt8.self).baseAddress!, maxLength: data.count) }
+                // 2. On ajoute le saut de ligne directement aux octets
+                jsonData.append(lineBreak)
+                
+                // 3. On écrit directement dans le flux (stream)
+                _ = jsonData.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) -> Int in
+                    guard let address = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return 0 }
+                    return stream.write(address, maxLength: jsonData.count)
+                }
             }
         }
+        print("💾 Fichier local finalisé avec \(dataToKeep.count) points.")
     }
 
     func uploadTripToServer(points: [[String: Any]], completion: @escaping (Bool) -> Void) {
