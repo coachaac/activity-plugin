@@ -17,6 +17,7 @@ DerivedData/
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .netrc
 
+# Android file
 
 # macOS files
 .DS_Store
@@ -42,7 +43,7 @@ out
 
 # Gradle files
 .gradle
-build
+build/
 
 # Local configuration file (sdk path, etc)
 local.properties

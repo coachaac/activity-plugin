@@ -111,14 +111,14 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
         let currentType = getActivityName(activity)
         let now = Date()
-        
-        // 1. Duplicate management
+    
+        // SECURITY ignore same activity as previous
         if currentType == self.lastSavedActivityType { return }
 
-        // 2. "STICKY" LOGIC while driving
+        // "STICKY" LOGIC while driving
         // if currently driving and receive stationary, save event but keep on Driving mode
-        if self.isDriving && currentType == "stationary" {
-            print("⏳ Red light or small stop : stationary saved, GPS remains.")
+        if self.isDriving && (currentType == "stationary" || activity.walking){
+            print("⏳ Red light or small stop or walking (for small stop): stationary saved, GPS remains.")
             // save stationary ENTER but keep isDriving
             let data = formatActivityData(type: "stationary", transition: "ENTER")
             saveLocationToJSON(point: data)
@@ -128,17 +128,11 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             return
         }
 
-        // 3. Activity detection toi activate driving
+        // 3. Activity detection to activate driving
         let isMovingFast = (locationManager.location?.speed ?? 0) > 5.0
         if activity.automotive || isMovingFast {
             self.lastAutomotiveDate = now
             
-            if self.isDriving && self.lastSavedActivityType == "stationary" {
-                let exitData = formatActivityData(type: "stationary", transition: "EXIT")
-                saveLocationToJSON(point: exitData)
-                self.notifyListeners("activityChange", data: exitData)
-                // ENTER automotive manage in the following
-            }
 
             if !self.isDriving {
                 print("🚗 Automotive START")
@@ -155,21 +149,17 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
                 }
 
                 startHighPrecisionGPS()
-                activityLock.unlock()
-                return
             }
         }
 
         // 4. TRANSITION  (EXIT OLD / ENTER NEW)
-        let oldType = self.lastSavedActivityType
-        self.lastSavedActivityType = currentType
-
-        if let old = oldType {
+        if let old = self.lastSavedActivityType {
             let exitData = formatActivityData(type: old, transition: "EXIT")
             saveLocationToJSON(point: exitData)
             self.notifyListeners("activityChange", data: exitData)
         }
 
+        self.lastSavedActivityType = currentType
         let enterData = formatActivityData(type: currentType, transition: "ENTER")
         saveLocationToJSON(point: enterData)
         self.notifyListeners("activityChange", data: enterData)
@@ -235,7 +225,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         if status == .authorizedAlways || status == .authorizedWhenInUse {
             DispatchQueue.main.async {
                 self.locationManager.desiredAccuracy = kCLLocationAccuracyBest
-                self.locationManager.distanceFilter = 5 // no location update if move is less than 5m
+                self.locationManager.distanceFilter = kCLDistanceFilterNone // no filtering
                 self.locationManager.allowsBackgroundLocationUpdates = true
                 self.locationManager.activityType = .automotiveNavigation
                 self.locationManager.pausesLocationUpdatesAutomatically = false
@@ -449,9 +439,11 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         guard let location = locations.last else { return }
         let now = Date()
 
+        let age = abs(location.timestamp.timeIntervalSinceNow)
+
         // 1. Detection BOOSTER (speed > 14 km/h)
         // Precision (<= 20m) prevent bad GPS position during fix
-        if location.speed > 4 && location.horizontalAccuracy <= 20 { 
+        if location.speed > 4 && location.horizontalAccuracy <= 20 && age < 30 { 
             self.lastAutomotiveDate = now
             
             if !self.isDriving {
@@ -530,67 +522,78 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
    
 
-    // Proicess end
+    // Process end
     private func forceStopDriving() {
-        print("🛑 forceStopDriving : End of trp conirmed (3min Timeout)")
+        // 0. lock to prevent // processing
+        activityLock.lock()
+        guard self.isDriving else { 
+            activityLock.unlock()
+            return 
+        }
+        self.isDriving = false
+        activityLock.unlock()
 
-        // 1. Save EXIT automotive in JSON
+        print("🛑 forceStopDriving : Processing end of trip...")
+
+        // 1. Set automotive EXIT
         let exitData = formatActivityData(type: "automotive", transition: "EXIT")
         self.saveLocationToJSON(point: exitData)
-        self.notifyListeners("activityChange", data: exitData)
-
-        // 2. Save ENTER in next state (stationary)
+        
+        // 2. Start stationnary
         let enterData = formatActivityData(type: "stationary", transition: "ENTER")
         self.saveLocationToJSON(point: enterData)
-        self.notifyListeners("activityChange", data: enterData)
 
-        // 3. reset internal states
-        self.isDriving = false
+        // 3. update states
         self.lastAutomotiveDate = nil
         self.lastSavedActivityType = "stationary"
         self.lastActivityChangeTime = Date()
-
-        // 4. Persist status (recover reboot/swipe)
         UserDefaults.standard.set(false, forKey: kIsDrivingState)
 
-        // 5. Stop GPS to save battery
+        // 4. free ressources
         self.stopHighPrecisionGPS()
-        
-        // 6. User Feedback in debug mode
-        if debugMode { 
-            self.triggerVibration(double: false) 
-        }
-
-        self.processAndUploadAutomotiveTripsOnly()
-
         self.lastWeatherLocation = nil 
         self.lastWeatherFetchDate = nil
         
-        print("✅ End of driving")
+        // 5. Notifications
+        self.notifyListeners("activityChange", data: exitData)
+        if debugMode { self.triggerVibration(double: false) }
+
+        // 6. upload with small delay
+        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 0.5) {
+            self.processAndUploadAutomotiveTripsOnly()
+        }
+        
+        print("✅ End of driving logic completed")
     }
 
     // MARK: - Saving & JSON
     private func saveLocationToJSON(point: [String: Any]) {
         let url = getFilePath()
         
-        // convert dictionnary to Data (one line JSON)
+        // 1. Conversion en JSONL (une ligne par objet)
         guard let jsonData = try? JSONSerialization.data(withJSONObject: point),
-              let jsonString = String(data: jsonData, encoding: .utf8) else { return }
-        
-        // add EOF to separate trips
-        let line = jsonString + "\n"
-        guard let dataToAppend = line.data(using: .utf8) else { return }
+              var lineData = (String(data: jsonData, encoding: .utf8)? + "\n")?.data(using: .utf8) else { 
+            return 
+        }
 
-        if FileManager.default.fileExists(atPath: url.path) {
-            // if file exixts open handle to write at the end
-            if let fileHandle = try? FileHandle(forWritingTo: url) {
-                fileHandle.seekToEndOfFile()
-                fileHandle.write(dataToAppend)
-                fileHandle.closeFile()
-            }
+        if !FileManager.default.fileExists(atPath: url.path) {
+            // 2. CRITIQUE : Créer le fichier avec la permission de lecture/écriture APRÈS le premier boot
+            // Cela permet au plugin d'écrire même si le téléphone est verrouillé (après un reboot).
+            let attributes = [FileAttributeKey.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
+            FileManager.default.createFile(atPath: url.path, contents: lineData, attributes: attributes)
+            print("📁 Fichier créé avec protection 'UntilFirstAuth'")
         } else {
-            // else create and write
-            try? dataToAppend.write(to: url, options: .noFileProtection)
+            // 3. Append efficace
+            do {
+                let fileHandle = try FileHandle(forWritingTo: url)
+                defer { fileHandle.closeFile() } // Sécurité pour fermer le handle quoi qu'il arrive
+                fileHandle.seekToEndOfFile()
+                fileHandle.write(lineData)
+            } catch {
+                print("❌ Erreur écriture fichier: \(error)")
+                // Optionnel : Tentative de secours si le handle échoue (protection lock)
+                try? lineData.write(to: url, options: .atomic)
+            }
         }
     }
 
@@ -708,15 +711,16 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     // Upload to server from js
     //
     @objc public func forceUpload(_ call: CAPPluginCall) {
-        // 1. Protect regarding multiple call to sync process
-        guard !syncInProgress else {
-            print("⚠️ Upload in progress request ignored.")
-            call.resolve([
-                "status": "upload_in_progress",
-                "message": "Sync in progress."
-            ])
+        syncLock.lock()
+        if syncInProgress {
+            syncLock.unlock()
+            print("⚠️ Sync already running. Ignoring JS call.")
+            call.resolve(["status": "already_syncing"])
             return
         }
+        // On ne met pas syncInProgress à true ici, 
+        // on laisse processAndUpload le faire proprement avec son propre lock.
+        syncLock.unlock()
 
         print("📲 Force upload triggered from JS")
         
@@ -802,6 +806,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
                 // Reset pour le prochain trajet
                 currentSegment = []
                 isInsideAutomotive = false
+                lastProcessedIndex = index
+            }
+
+            if !isInsideAutomotive {
                 lastProcessedIndex = index
             }
         }
@@ -981,33 +989,26 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     }
 
     private func finalizeLocalStorage(failedTrips: [[[String: Any]]], remainingData: [[String: Any]]) {
-        var dataToKeep = [[String: Any]]()
-        
-        // 1. On remet les trajets qui ont échoué à l'upload
-        for trip in failedTrips {
-            dataToKeep.append(contentsOf: trip)
-        }
-        
-        // 2. On ajoute les points du trajet en cours (ou non stabilisé)
-        dataToKeep.append(contentsOf: remainingData)
-
+        let dataToKeep = failedTrips.flatMap { $0 } + remainingData
         let fileURL = getFilePath()
         
-        if dataToKeep.isEmpty {
+        guard !dataToKeep.isEmpty else {
             try? FileManager.default.removeItem(at: fileURL)
-            print("🗑️ Fichier purgé (tout est envoyé)")
-        } else {
-            var jsonlString = ""
-            for point in dataToKeep {
-                if let jsonData = try? JSONSerialization.data(withJSONObject: point),
-                   let jsonString = String(data: jsonData, encoding: .utf8) {
-                    jsonlString += jsonString + "\n"
-                }
+            return
+        }
+
+        // Utilisation d'un OutputStream pour ne pas charger tout en RAM
+        guard let stream = OutputStream(url: fileURL, append: false) else { return }
+        stream.open()
+        defer { stream.close() }
+
+        for point in dataToKeep {
+            if let jsonData = try? JSONSerialization.data(withJSONObject: point),
+               let jsonString = (String(data: jsonData, encoding: .utf8)? + "\n"),
+               let data = jsonString.data(using: .utf8) {
+                
+                _ = data.withUnsafeBytes { stream.write($0.bindMemory(to: UInt8.self).baseAddress!, maxLength: data.count) }
             }
-            // Écriture atomique : Swift écrit dans un fichier temporaire puis remplace l'ancien
-            // C'est très sûr contre les corruptions.
-            try? jsonlString.write(to: fileURL, atomically: true, encoding: .utf8)
-            print("💾 Fichier mis à jour : \(dataToKeep.count) points conservés.")
         }
     }
 
