@@ -28,8 +28,8 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     private var lastLoggedActivities: [String: Date] = [:]
 
     private let activityLock = NSLock()
-
     private let syncLock = NSLock()
+    private let fileAccessLock = NSLock()
 
     // Clés pour le stockage
     private let kIsTrackingActive = "tracking_active"
@@ -111,6 +111,13 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
         let currentType = getActivityName(activity)
         let now = Date()
+
+        // if walking but not currently driving set GPS in low consumption to enable automotive detection faster
+        if activity.walking && !self.isDriving {
+            // maintain sensor awake for driving dtection
+            self.locationManager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+            self.locationManager.startUpdatingLocation()
+        }
     
         // SECURITY ignore same activity as previous
         if currentType == self.lastSavedActivityType { return }
@@ -120,6 +127,9 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         if self.isDriving && (currentType == "stationary" || activity.walking){
             print("⏳ Red light or small stop or walking (for small stop): stationary saved, GPS remains.")
             // save stationary ENTER but keep isDriving
+
+            self.logToFile("Activitée reçue: stationary ENTER")
+
             let data = formatActivityData(type: "stationary", transition: "ENTER")
             saveLocationToJSON(data)
             self.notifyListeners("activityChange", data: data)
@@ -154,12 +164,18 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
         // 4. TRANSITION  (EXIT OLD / ENTER NEW)
         if let old = self.lastSavedActivityType {
+
+            self.logToFile("Activitée reçue: " + old + " EXIT")
+
             let exitData = formatActivityData(type: old, transition: "EXIT")
             saveLocationToJSON(exitData)
             self.notifyListeners("activityChange", data: exitData)
         }
 
         self.lastSavedActivityType = currentType
+
+        self.logToFile("Activitée reçue: " + currentType + " ENTER")
+
         let enterData = formatActivityData(type: currentType, transition: "ENTER")
         saveLocationToJSON(enterData)
         self.notifyListeners("activityChange", data: enterData)
@@ -288,8 +304,11 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         activityManager.stopActivityUpdates() // Clean start
         startActivityDetection()
 
-
+        // wake up app when cell change
         locationManager.startMonitoringSignificantLocationChanges()
+
+        // wake up app when visited place change
+        self.locationManager.startMonitoringVisits()
         call.resolve()
     }
 
@@ -458,6 +477,9 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
                 
                 // Log de l'événement ENTER pour le trajet
                 let enterData = formatActivityData(type: "automotive", transition: "ENTER")
+
+                self.logToFile("Activitée reçue: automotive ENTER")
+
                 saveLocationToJSON(enterData)
                 self.notifyListeners("activityChange", data: enterData)
                 
@@ -516,6 +538,8 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             print("⏳ Weather not yet available for this point")
         }
 
+        self.logToFile("Position reçue")
+
         saveLocationToJSON(newPoint)
         self.notifyListeners("onLocationUpdate", data: newPoint)
     }
@@ -536,10 +560,16 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         print("🛑 forceStopDriving : Processing end of trip...")
 
         // 1. Set automotive EXIT
+
+        self.logToFile("Activité reçue: automotive EXIT")
+
         let exitData = formatActivityData(type: "automotive", transition: "EXIT")
         self.saveLocationToJSON(exitData)
         
         // 2. Start stationnary
+
+        self.logToFile("Activité reçue: stationary ENTER")
+
         let enterData = formatActivityData(type: "stationary", transition: "ENTER")
         self.saveLocationToJSON(enterData)
 
@@ -568,6 +598,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
     // MARK: - Saving & JSON
     private func saveLocationToJSON(_ locationData: [String: Any]) {
+
+        fileAccessLock.lock()
+        defer { fileAccessLock.unlock() }
+
         let fileURL = getFilePath()
         
         // 1. Sérialisation en Data (Binaire)
@@ -747,7 +781,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         syncInProgress = true
         syncLock.unlock()
 
+        fileAccessLock.lock() 
         let allEntries = self.getAllStoredLocations()
+        fileAccessLock.unlock() // On libère le verrou pendant le calcul lourd (CPU)
+
         guard !allEntries.isEmpty else { 
             self.syncInProgress = false
             return 
@@ -955,33 +992,28 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         let dataToKeep = failedTrips.flatMap { $0 } + remainingData
         let fileURL = getFilePath()
         
-        guard !dataToKeep.isEmpty else {
+        fileAccessLock.lock() // BLOQUE TOUTE ÉCRITURE GPS PENDANT LA PURGE
+        defer { fileAccessLock.unlock() }
+
+        if dataToKeep.isEmpty {
             try? FileManager.default.removeItem(at: fileURL)
             return
         }
 
-        // Utilisation d'un OutputStream pour ne pas charger tout en RAM
+        // Réécriture propre du fichier avec uniquement ce qui n'a pas été envoyé
         guard let stream = OutputStream(url: fileURL, append: false) else { return }
         stream.open()
         defer { stream.close() }
 
-        let lineBreak = UInt8(0x0A) // Le caractère '\n' en binaire
-
+        let lineBreak = UInt8(0x0A)
         for point in dataToKeep {
-            // 1. On transforme le dictionnaire en Data
             if var jsonData = try? JSONSerialization.data(withJSONObject: point, options: []) {
-                
-                // 2. On ajoute le saut de ligne directement aux octets
                 jsonData.append(lineBreak)
-                
-                // 3. On écrit directement dans le flux (stream)
-                _ = jsonData.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) -> Int in
-                    guard let address = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return 0 }
-                    return stream.write(address, maxLength: jsonData.count)
+                _ = jsonData.withUnsafeBytes { buffer in
+                    stream.write(buffer.bindMemory(to: UInt8.self).baseAddress!, maxLength: jsonData.count)
                 }
             }
         }
-        print("💾 Fichier local finalisé avec \(dataToKeep.count) points.")
     }
 
     func uploadTripToServer(points: [[String: Any]], completion: @escaping (Bool) -> Void) {
@@ -1207,4 +1239,76 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
         task.resume()
     }
+
+
+    func logToFile(_ message: String) {
+        let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .medium)
+        let logEntry = "\(timestamp) : \(message)\n"
+        
+        guard let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let fileURL = documentsDirectory.appendingPathComponent("debug_log.txt")
+        
+        // --- Auto-vide : Si le fichier dépasse 1 Mo (1 048 576 octets) ---
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            if let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
+               let fileSize = attributes[.size] as? UInt64,
+               fileSize > 1024 * 1024 {
+                
+                // On supprime et on repart à zéro
+                try? FileManager.default.removeItem(at: fileURL)
+                let resetNote = "--- Log reset (Taille max atteinte) ---\n"
+                try? resetNote.write(to: fileURL, atomically: true, encoding: .utf8)
+            }
+        }
+        
+        // --- Écriture du log (Append) ---
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            try? logEntry.write(to: fileURL, atomically: true, encoding: .utf8)
+        } else {
+            if let fileHandle = try? FileHandle(forWritingTo: fileURL) {
+                fileHandle.seekToEndOfFile()
+                if let data = logEntry.data(using: .utf8) {
+                    fileHandle.write(data)
+                }
+                fileHandle.closeFile()
+            }
+        }
+        
+        print("DEBUG: \(message)") // Toujours visible dans Xcode
+    }
+
+    //
+    // queryPastActivities
+    // Query phone activity manager that could have event not managed by app during sleep
+    // 
+
+    private func queryPastActivities(from startDate: Date, to endDate: Date) {
+        self.logToFile("🔍 Interrogation de l'historique : \(startDate) -> \(endDate)")
+        
+        activityManager.queryActivityStarting(from: startDate, to: endDate, to: .main) { (activities, error) in
+            guard let activities = activities, error == nil else {
+                self.logToFile("❌ Erreur queryActivity : \(error?.localizedDescription ?? "unknown")")
+                return
+            }
+
+            for activity in activities {
+                // On ne traite que les segments significatifs (Automotive ou High Speed)
+                if activity.automotive {
+                    let timestamp = activity.startDate.timeIntervalSince1970 * 1000
+                    let data = [
+                        "type": "activity",
+                        "activity": "automotive",
+                        "transition": "ENTER", // On simule un ENTER rétrospectif
+                        "date": self.getFormattedDateFrom(activity.startDate),
+                        "timestamp": Int64(timestamp),
+                        "isBackfill": true
+                    ] as [String : Any]
+                    
+                    self.logToFile("⏪ Point historique retrouvé : Automotive à \(data["date"]!)")
+                    //self.saveLocationToJSON(data)
+                }
+            }
+        }
+    }
+
 }
