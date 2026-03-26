@@ -744,7 +744,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
 
     //
-    // Upload to server from js
+    // Sync entry called from js
     //
     @objc public func forceUpload(_ call: CAPPluginCall) {
         syncLock.lock()
@@ -754,23 +754,19 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             call.resolve(["status": "already_syncing"])
             return
         }
-        // On ne met pas syncInProgress à true ici, 
-        // on laisse processAndUpload le faire proprement avec son propre lock.
+
+        syncInProgress = true
         syncLock.unlock()
 
         print("📲 Force upload triggered from JS")
         
-        // 2. LAunch process as not currently in progress
-        self.processAndUploadAutomotiveTripsOnly()
-        
-        // 3. Send answer to jsJS
-        call.resolve([
-            "status": "upload_initiated"
-        ])
+        self.executeInternalSync {
+            call.resolve(["status": "upload_completed"])
+        }
     }
 
     //
-    // Upload to server
+    // sync entry called only on end of trip
     //
     func processAndUploadAutomotiveTripsOnly() {
         syncLock.lock()
@@ -780,13 +776,22 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
         syncInProgress = true
         syncLock.unlock()
+        
+        self.executeInternalSync(completion: nil)
+    }
+
+    //
+    // Upload to server process from JS and enof trip entry
+    //
+    private func executeInternalSync(completion: (() -> Void)? = nil) {
 
         fileAccessLock.lock() 
         let allEntries = self.getAllStoredLocations()
-        fileAccessLock.unlock() // On libère le verrou pendant le calcul lourd (CPU)
+        fileAccessLock.unlock()
 
         guard !allEntries.isEmpty else { 
-            self.syncInProgress = false
+            self.releaseSync()
+            completion?()
             return 
         }
 
@@ -863,13 +868,24 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
         // Upload
         self.uploadTripsSequentially(tripsToUpload: finishedTrips, remainingData: remainingData) {
-            self.syncLock.lock()
-            self.syncInProgress = false
-            self.syncLock.unlock()
+            self.releaseSync()
+            completion?()
         }
     }
 
+    //
+    // release sync, utils
+    //
+    private func releaseSync() {
+        self.syncLock.lock()
+        self.syncInProgress = false
+        self.syncLock.unlock()
+    }
 
+
+    //
+    // remove pedestian segments, check pedestrian start
+    //
     private func trimPedestrianStart(_ trip: [[String: Any]], speedThreshold: Double) -> [[String: Any]] {
         var firstMotorizedIndex = -1
 
@@ -898,6 +914,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         return [] // Nothing motorized found
     }
 
+
+    //
+    // remove pedestian segments, check pedestrian end
+    //
     private func trimPedestrianEnd(_ trip: [[String: Any]], speedThreshold: Double) -> [[String: Any]] {
         var lastMotorizedIndex = -1
 
@@ -923,7 +943,9 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
    
 
-
+    //
+    // check if trip muste be kept or not
+    //
     private func isTripSignificant(trip: [[String: Any]]) -> Bool {
         
         var totalDistance: Double = 0
@@ -958,6 +980,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         return isSignificant
     }
 
+
+    //
+    // Loops inside trips array to send them to server
+    //
     private func uploadTripsSequentially(tripsToUpload: [[[String: Any]]], remainingData: [[String: Any]], completion: @escaping () -> Void) {
         
         var tripsToRetry = [[[String: Any]]]() // keep only those who need a retry
@@ -1016,6 +1042,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
     }
 
+
+    //
+    // upload on trip to server to server
+    //
     func uploadTripToServer(points: [[String: Any]], completion: @escaping (Bool) -> Void) {
     
         // 1. Récupération des credentials (mémoire ou UserDefaults)
