@@ -781,27 +781,69 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     }
 
     //
-    // Upload to server process from JS and enof trip entry
+    // Upload to server process from JS and end of trip entry
     //
     private func executeInternalSync(completion: (() -> Void)? = nil) {
-
-        fileAccessLock.lock() 
-        let allEntries = self.getAllStoredLocations()
-        fileAccessLock.unlock()
-
-        guard !allEntries.isEmpty else { 
-            self.releaseSync()
-            completion?()
-            return 
+        // 1. Déclarer une tâche de background pour empêcher iOS de suspendre l'app
+        var bgTask: UIBackgroundTaskIdentifier = .invalid
+        bgTask = UIApplication.shared.beginBackgroundTask {
+            // Si iOS nous coupe le temps, on nettoie proprement
+            UIApplication.shared.endBackgroundTask(bgTask)
+            bgTask = .invalid
         }
 
+        let fileURL = getFilePath()
+        let processingURL = fileURL.deletingLastPathComponent().appendingPathComponent("processing_locations.json")
+
+        // --- PHASE ATOMIQUE : ISOLATION DES DONNÉES ---
+        fileAccessLock.lock()
+        
+        // Si le fichier n'existe pas, on arrête tout de suite
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            fileAccessLock.unlock()
+            self.releaseSync()
+            UIApplication.shared.endBackgroundTask(bgTask)
+            completion?()
+            return
+        }
+
+        do {
+            // On nettoie un éventuel résidu de crash précédent
+            if FileManager.default.fileExists(atPath: processingURL.path) {
+                try FileManager.default.removeItem(at: processingURL)
+            }
+            // ON DÉPLACE : Le fichier source devient vide pour le GPS
+            try FileManager.default.moveItem(at: fileURL, to: processingURL)
+        } catch {
+            print("❌ Erreur MoveItem: \(error)")
+            fileAccessLock.unlock()
+            self.releaseSync()
+            UIApplication.shared.endBackgroundTask(bgTask)
+            completion?()
+            return
+        }
+        fileAccessLock.unlock()
+        // --- FIN DE LA PHASE CRITIQUE ---
+
+        // 2. Lecture du fichier isolé (processing_locations.json)
+        let allEntries = self.loadLocationsFromFile(url: processingURL)
+        
+        guard !allEntries.isEmpty else {
+            try? FileManager.default.removeItem(at: processingURL)
+            self.releaseSync()
+            UIApplication.shared.endBackgroundTask(bgTask)
+            completion?()
+            return
+        }
+
+        // 3. Traitement et Découpage (Segmentation)
         var finishedTrips = [[[String: Any]]]()
         var currentSegment = [[String: Any]]()
         var isInsideAutomotive = false
         var lastProcessedIndex = -1
         
-        let GRACE_TIMER_MS: Double = 3 * 60 * 1000 // 3 minutes
-        let SPEED_THRESHOLD = 1.7 // ~6 km/h (Vitesse plancher pour maintien)
+        let GRACE_TIMER_MS: Double = 10 * 60 * 1000 // 10 minutes (Sécurité iOS)
+        let SPEED_THRESHOLD = 1.7 
 
         for (index, entry) in allEntries.enumerated() {
             let type = entry["type"] as? String ?? ""
@@ -810,7 +852,6 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             let timestamp = entry["timestamp"] as? Double ?? 0
             let speed = entry["speed"] as? Double ?? 0
 
-            // --- DÉTECTION DU DÉBUT (ENTER) ---
             if type == "activity" && activity == "automotive" && transition == "ENTER" {
                 isInsideAutomotive = true
             }
@@ -819,46 +860,31 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
                 currentSegment.append(entry)
             }
 
-            // --- DÉTECTION DE LA FIN (EXIT ou GRACE TIMER) ---
             var shouldCloseTrip = false
-            
-            // Cas 1 : EXIT explicite
             if type == "activity" && activity == "automotive" && transition == "EXIT" {
                 shouldCloseTrip = true
-            } 
-            // Cas 2 : Grace Timer (On regarde le point suivant s'il existe)
-            else if isInsideAutomotive && index < allEntries.count - 1 {
+            } else if isInsideAutomotive && index < allEntries.count - 1 {
                 let nextEntry = allEntries[index + 1]
                 let nextTimestamp = nextEntry["timestamp"] as? Double ?? 0
-                let gap = nextTimestamp - timestamp
-                
-                // Si le trou est > 3 min ET que la vitesse actuelle est faible
-                if gap > GRACE_TIMER_MS && speed < SPEED_THRESHOLD {
+                if (nextTimestamp - timestamp) > GRACE_TIMER_MS && speed < SPEED_THRESHOLD {
                     shouldCloseTrip = true
                 }
             }
 
             if shouldCloseTrip && !currentSegment.isEmpty {
-                // Nettoyage et Validation (Nettoie la marche avant/après)
                 var cleaned = trimPedestrianStart(currentSegment, speedThreshold: SPEED_THRESHOLD)
                 cleaned = trimPedestrianEnd(cleaned, speedThreshold: SPEED_THRESHOLD)
-
                 if isTripSignificant(trip: cleaned) {
                     finishedTrips.append(cleaned)
                 }
-
-                // Reset pour le prochain trajet
                 currentSegment = []
                 isInsideAutomotive = false
                 lastProcessedIndex = index
             }
-
-            if !isInsideAutomotive {
-                lastProcessedIndex = index
-            }
+            if !isInsideAutomotive { lastProcessedIndex = index }
         }
 
-        // --- GESTION DES RÉSIDUS ---
+        // 4. Identification des résidus (Trajet non fini)
         var remainingData = [[String: Any]]()
         if lastProcessedIndex < allEntries.count - 1 {
             for i in (lastProcessedIndex + 1)..<allEntries.count {
@@ -866,11 +892,40 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             }
         }
 
-        // Upload
+        // 5. Upload Séquentiel
         self.uploadTripsSequentially(tripsToUpload: finishedTrips, remainingData: remainingData) {
+            // Nettoyage final après succès ou mise en échec gérée
+            try? FileManager.default.removeItem(at: processingURL)
+            
             self.releaseSync()
+            UIApplication.shared.endBackgroundTask(bgTask)
+            bgTask = .invalid
             completion?()
         }
+    }
+
+    private func loadLocationsFromFile(url: URL) -> [[String: Any]] {
+        var locations = [[String: Any]]()
+        
+        // Vérifier si le fichier existe avant de tenter la lecture
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        
+        do {
+            let data = try String(contentsOf: url, encoding: .utf8)
+            let lines = data.components(separatedBy: .newlines)
+            
+            for line in lines {
+                if line.isEmpty { continue }
+                if let lineData = line.data(using: .utf8),
+                   let json = try? JSONSerialization.jsonObject(with: lineData, options: []) as? [String: Any] {
+                    locations.append(json)
+                }
+            }
+        } catch {
+            print("❌ Erreur lecture fichier processing : \(error.localizedDescription)")
+        }
+        
+        return locations
     }
 
     //
@@ -1015,30 +1070,32 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     }
 
     private func finalizeLocalStorage(failedTrips: [[[String: Any]]], remainingData: [[String: Any]]) {
-        let dataToKeep = failedTrips.flatMap { $0 } + remainingData
+        let dataToPutBack = failedTrips.flatMap { $0 } + remainingData
+        guard !dataToPutBack.isEmpty else { return }
+
         let fileURL = getFilePath()
         
-        fileAccessLock.lock() // BLOQUE TOUTE ÉCRITURE GPS PENDANT LA PURGE
+        // On reverrouille pour l'écriture physique
+        fileAccessLock.lock()
         defer { fileAccessLock.unlock() }
 
-        if dataToKeep.isEmpty {
-            try? FileManager.default.removeItem(at: fileURL)
-            return
+        // On utilise un FileHandle pour AJOUTER à la fin (Append) 
+        // plutot que d'écraser le fichier que le GPS utilise peut-être déjà
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            FileManager.default.createFile(atPath: fileURL.path, contents: nil, attributes: nil)
         }
 
-        // Réécriture propre du fichier avec uniquement ce qui n'a pas été envoyé
-        guard let stream = OutputStream(url: fileURL, append: false) else { return }
-        stream.open()
-        defer { stream.close() }
-
-        let lineBreak = UInt8(0x0A)
-        for point in dataToKeep {
-            if var jsonData = try? JSONSerialization.data(withJSONObject: point, options: []) {
-                jsonData.append(lineBreak)
-                _ = jsonData.withUnsafeBytes { buffer in
-                    stream.write(buffer.bindMemory(to: UInt8.self).baseAddress!, maxLength: jsonData.count)
+        if let fileHandle = try? FileHandle(forWritingTo: fileURL) {
+            fileHandle.seekToEndOfFile()
+            
+            for point in dataToPutBack {
+                if var jsonData = try? JSONSerialization.data(withJSONObject: point, options: []) {
+                    jsonData.append(0x0A) // \n
+                    fileHandle.write(jsonData)
                 }
             }
+            fileHandle.closeFile()
+            print("♻️ \(dataToPutBack.count) points ré-injectés dans le fichier principal (échec ou non fini).")
         }
     }
 
