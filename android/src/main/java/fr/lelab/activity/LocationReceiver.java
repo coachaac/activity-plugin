@@ -26,6 +26,12 @@ public class LocationReceiver extends BroadcastReceiver {
         JSObject currentWeather = JsonStorageHelper.getLastWeather();
 
         for (Location location : locationResult.getLocations()) {
+
+            // keep only point with accuracy less than 20m
+            if (location.getAccuracy() > 20) {
+                continue; 
+            }
+
             
             // On appelle saveLocation une seule fois. 
             // Si currentWeather est null, la méthode saveLocation le gérera proprement.

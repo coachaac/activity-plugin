@@ -32,7 +32,9 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
         if (intent == null) return;
         String action = intent.getAction();
 
+        Log.d("SmartPilot", "📩 Receved : Action = " + action);
 
+        // --- 1. ALARM Management (STOP GRACE PERIOD) ---
         if (ACTION_STOP_GPS_GRACE.equals(action)) {
             long scheduledAt = intent.getLongExtra("scheduled_at", 0);
             long now = System.currentTimeMillis();
@@ -49,15 +51,6 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
             return;
         }
         
-
-        Log.d("SmartPilot", "📩 Receved : Action = " + action);
-
-        // --- 1. ALARM Management (STOP GRACE PERIOD) ---
-        if (ACTION_STOP_GPS_GRACE.equals(action)) {
-            Log.d(TAG, "⏱ AlarmManager : end of grace delay, close service.");
-            switchToIdleMode(context);
-            return;
-        }
 
         // --- 2. ADB SIMULATION Management ---
         if (intent.hasExtra("com.google.android.gms.location.EXTRA_ACTIVITY_RESULT")) {
@@ -86,7 +79,9 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
         updateDrivingState(safeContext, false);
 
         // try to launch sync to server
-        triggerUploadWorker(context);
+        // TEST VERSION COMMENT BEGIN
+        //triggerUploadWorker(context);
+        // TEST VERSION COMMENT END
 
         // 2. send ACTION_UPDATE_NOTIF not stopService
         Intent serviceIntent = new Intent(context, TrackingService.class);
@@ -236,7 +231,7 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
                     .setRequiredNetworkType(NetworkType.CONNECTED)
                     .build();
 
-            // Création de la requête pour le Worker que tu as déjà créé
+            // Création de la requête pour le Worker déjà créé
             OneTimeWorkRequest uploadRequest = new OneTimeWorkRequest.Builder(TripUploadWorker.class)
                     .setConstraints(constraints)
                     .addTag("TRIP_UPLOAD_TASK")

@@ -189,6 +189,7 @@ public class ActivityRecognitionPlugin extends Plugin {
 
     @PluginMethod
     public void startTracking(PluginCall call) {
+        Log.d(TAG, "🚗 Start Tracking");
 
         SharedPreferences trackPrefs = getContext().getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
         boolean wasTracking = trackPrefs.getBoolean("tracking_active", false);
@@ -249,6 +250,8 @@ public class ActivityRecognitionPlugin extends Plugin {
 
     @PluginMethod
     public void stopTracking(PluginCall call) {
+        Log.d(TAG, "🚗 Stop Tracking");
+
         isDriving = false;
         // Mise à jour de l'état "Inactif"
         getSafeContext().getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
@@ -271,6 +274,8 @@ public class ActivityRecognitionPlugin extends Plugin {
 
     @PluginMethod
     public void getSavedLocations(PluginCall call) {
+        Log.d(TAG, "🚗 getSavedLocations");
+
         // Lecture dans le stockage sécurisé (Direct Boot Aware)
         JSArray locations = JsonStorageHelper.loadLocationsAsJSArray(getSafeContext());
         JSObject ret = new JSObject();
@@ -280,6 +285,8 @@ public class ActivityRecognitionPlugin extends Plugin {
 
     @PluginMethod
     public void clearSavedLocations(PluginCall call) {
+        Log.d(TAG, "🚗 clearSavedLocations");
+
         JsonStorageHelper.clearLocations(getSafeContext());
         call.resolve();
     }
@@ -287,6 +294,8 @@ public class ActivityRecognitionPlugin extends Plugin {
 
     @PluginMethod
     public void shareSavedLocations(PluginCall call) {
+        Log.d(TAG, "🚗 shareSavedLocations");
+
         try {
 
             Context safeContext = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) 
@@ -361,6 +370,9 @@ public class ActivityRecognitionPlugin extends Plugin {
 
     @PluginMethod
         public void forceUpload(PluginCall call) {
+
+            Log.d(TAG, "🚗 forceUpload");
+
             Context context = getContext();
             
             // Get infos from prefs

@@ -168,6 +168,7 @@ public class TrackingService extends Service {
                 .setMinUpdateIntervalMillis(1000)
                 .setMinUpdateDistanceMeters(5) // 5 meters more precision in Town
                 .setWaitForAccurateLocation(true)
+                .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
                 .build();
 
         Intent intent = new Intent(this, LocationReceiver.class);

@@ -590,7 +590,9 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
         // 6. upload with small delay
         DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 0.5) {
-            self.processAndUploadAutomotiveTripsOnly()
+            // TEST VERSION COMMENT BEGIN
+            //self.processAndUploadAutomotiveTripsOnly()
+            // TEST VERSION COMMENT END
         }
         
         print("✅ End of driving logic completed")
