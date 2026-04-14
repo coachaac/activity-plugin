@@ -79,12 +79,12 @@ public class WeatherReceiver extends BroadcastReceiver {
                             }
                             
                         } else {
-                            Log.w(TAG, "❓ Position inconnue pour la météo");
+                            Log.w(TAG, "❓ Position unknown for weather forecast");
                         }
                     }
                 });
         } catch (SecurityException e) {
-            Log.e(TAG, "🚫 Permissions manquantes", e);
+            Log.e(TAG, "🚫 Missing Permissions", e);
         }
     }
 

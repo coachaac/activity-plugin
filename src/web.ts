@@ -43,7 +43,7 @@ export class ActivityRecognitionWeb extends WebPlugin implements ActivityRecogni
   }
 
   async testSettings(): Promise<{ status: 'ok' | 'error'; statusCode: number; url: string; groupId: string }> {
-    console.warn('testSettings n’est pas disponible sur le Web. Simulation d’un succès.');
+    console.warn('testSettings not available on Web. Success simulated.');
     return {
       status: 'ok',
       statusCode: 200,
@@ -53,7 +53,7 @@ export class ActivityRecognitionWeb extends WebPlugin implements ActivityRecogni
   }
 
   async isSyncing(): Promise<{ inProgress: boolean }> {
-    // Sur le web, on considère qu'aucune synchro n'est en cours
+    // web version considering no syncing in progress
     return { inProgress: false };
   }
   

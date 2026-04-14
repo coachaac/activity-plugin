@@ -28,7 +28,7 @@ public class ActivityRecognition {
         this.activityClient = com.google.android.gms.location.ActivityRecognition.getClient(context);
     }
 
-    // --- Persistence de l'état ---
+    // --- state Persistence ---
     private void saveState(String key, boolean value) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         prefs.edit().putBoolean(key, value).apply();

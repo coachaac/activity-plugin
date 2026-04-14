@@ -78,10 +78,7 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
             ? context.createDeviceProtectedStorageContext() : context;
         updateDrivingState(safeContext, false);
 
-        // try to launch sync to server
-        // TEST VERSION COMMENT BEGIN
-        //triggerUploadWorker(context);
-        // TEST VERSION COMMENT END
+        triggerUploadWorker(context);
 
         // 2. send ACTION_UPDATE_NOTIF not stopService
         Intent serviceIntent = new Intent(context, TrackingService.class);
@@ -106,7 +103,7 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
         
         Log.d(TAG, "⚡ Management : " + normalizedActivity + " [" + transitionName + "]");
 
-        // 1. Sauvegarde dans le fichier local JSONL (On utilise le SafeContext pour le reboot)
+        // 1. Sauveg in local JSONL (use SafeContext for reboot)
         Context safeContext = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) 
             ? context.createDeviceProtectedStorageContext() : context;
         
@@ -155,7 +152,7 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
 
         Intent intent = new Intent(context, ActivityTransitionReceiver.class);
         intent.setAction(ACTION_STOP_GPS_GRACE);
-        // On ajoute le timestamp prévu pour le calcul de dérive
+
         intent.putExtra("scheduled_at", triggerAt);
 
         PendingIntent pi = PendingIntent.getBroadcast(context, 0, intent, 
@@ -163,7 +160,7 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
 
         AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (am != null) {
-            // Fenêtre de 30 secondes pour laisser de la souplesse à l'OS sans sacrifier la précision
+            // 30 secondes window to let OS without much constraint
             am.setWindow(AlarmManager.RTC_WAKEUP, triggerAt, 30000, pi);
             Log.d(TAG, "⏰ Alarme programmée à " + (STOP_DELAY / 1000) + "s (Fenêtre 30s)");
         }
@@ -239,9 +236,9 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
 
             // Envoi dans la file d'attente du système
             WorkManager.getInstance(context).enqueue(uploadRequest);
-            Log.d(TAG, "📡 WorkManager : Trajet terminé et stabilisé. Envoi planifié.");
+            Log.d(TAG, "📡 WorkManager : Trip ended sending scheduled.");
         } catch (Exception e) {
-            Log.e(TAG, "❌ Erreur lors de la planification du Worker : " + e.getMessage());
+            Log.e(TAG, "❌ Error during trip sending schedule : " + e.getMessage());
         }
     }
 

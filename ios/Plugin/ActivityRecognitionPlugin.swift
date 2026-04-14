@@ -20,6 +20,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     private let stopDelay: TimeInterval = 180 // 3 minutes
     private var debugMode = false
     private var syncInProgress = false
+    private var hasPerformedFirstPurgeInSession = false
 
     private var lastSavedActivityType: String? = nil
     private var lastActivityForExit: String? = nil
@@ -46,6 +47,9 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     private var lastWeatherLocation: CLLocation? = nil
     private let weatherDistanceThreshold: CLLocationDistance = 2000 // 2 km
 
+    //
+    // restore location tracking state after restart or swipe app
+    //
     @objc public override func load() {
         locationManager.delegate = self
         locationManager.pausesLocationUpdatesAutomatically = false
@@ -74,14 +78,18 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
     }
 
+    //
     // Helper Date
+    //
     private func getFormattedDate() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return formatter.string(from: Date())
     }
 
-    // Centraliseed Logic 
+    //
+    // Centraliseed Logic for Activity detection
+    //
     private func startActivityDetection() {
         guard CMMotionActivityManager.isActivityAvailable() else { return }
         
@@ -93,6 +101,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
     }
 
+
+    //
+    // Vibrate function use in debug to inform start / Stop automotive
+    //
     private func triggerVibration(double: Bool) {
         // Vibration système (fonctionne en background et téléphone verrouillé)
         AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
@@ -105,6 +117,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
     }
 
+
+    //
+    // Handle update of user activity
+    //
     private func handleActivityUpdate(_ activity: CMMotionActivity) {
         activityLock.lock()
         defer { activityLock.unlock() }
@@ -192,38 +208,19 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         ]
     }
 
-    
-    private func processRembobinage(locations: [CLLocation], startDate: Date) {
-        print("⏪ try to get position before : \(startDate)")
-        
-        for location in locations {
-            // keep only point with timestamp after real activity start and precision ok 
-            if location.timestamp >= startDate && location.horizontalAccuracy <= 20 {
-                
-                let backfillPoint: [String: Any] = [
-                    "type": "location",
-                    "lat": location.coordinate.latitude,
-                    "lng": location.coordinate.longitude,
-                    "speed": location.speed,
-                    "date": getFormattedDateFrom(location.timestamp),
-                    "timestamp": location.timestamp.timeIntervalSince1970 * 1000,
-                    "isBackfill": true 
-                ]
-                
-                print("📍 save restored point (\(location.timestamp))")
-                saveLocationToJSON(backfillPoint)
-            }
-        }
-    }
 
-    // MARK: - Helpers Date 
+    //
+    // Helpers for Date 
+    //
     private func getFormattedDateFrom(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return formatter.string(from: date)
     }
 
-
+    //
+    // format activity name (to be same in iOS and Android)
+    //
     private func getActivityName(_ activity: CMMotionActivity) -> String {
         if activity.automotive { return "automotive" }
         if activity.walking { return "walking" }
@@ -234,8 +231,9 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     }
 
 
-
-    // MARK: - GPS Management
+    //
+    // - GPS Management, start high precision
+    //
     private func startHighPrecisionGPS() {
         let status = CLLocationManager.authorizationStatus()
         if status == .authorizedAlways || status == .authorizedWhenInUse {
@@ -254,6 +252,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
     }
 
+
+    //
+    // - GPS Management, stop high precision
+    //
     private func stopHighPrecisionGPS() {
         DispatchQueue.main.async {
             // battery saving stop location engine
@@ -266,7 +268,9 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
     }
 
-    // MARK: - Plugin Methods (JS Interfaces)
+    //
+    // - Plugin Methods (JS Interfaces), StartTracking (set automatic recording of trips)
+    // 
     @objc public func startTracking(_ call: CAPPluginCall) {
         UserDefaults.standard.set(true, forKey: kIsTrackingActive)
 
@@ -312,6 +316,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         call.resolve()
     }
 
+
+    //
+    // - Plugin Methods (JS Interfaces), stopTracking (stop automatic recording of trips)
+    // 
     @objc public func stopTracking(_ call: CAPPluginCall) {
         UserDefaults.standard.set(false, forKey: kIsTrackingActive)
         UserDefaults.standard.set(false, forKey: kIsDrivingState)
@@ -333,16 +341,28 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         call.resolve()
     }
 
+
+    //
+    // - Plugin Methods (JS Interfaces), getSavedLocations (get all recording event and location from saving file)
+    // 
     @objc public func getSavedLocations(_ call: CAPPluginCall) {
         let points = loadStoredPoints()
         call.resolve(["locations": points])
     }
 
+
+    //
+    // - Plugin Methods (JS Interfaces), clearSavedLocations (delete event/position saving file)
+    // 
     @objc public func clearSavedLocations(_ call: CAPPluginCall) {
         try? FileManager.default.removeItem(at: getFilePath())
         call.resolve()
     }
 
+
+    //
+    // - Plugin Methods (JS Interfaces), checkPermissions status to verify if all ok
+    // 
     @objc public override func checkPermissions(_ call: CAPPluginCall) {
         // 1. Activity permission Verification
         var activityStatus = "prompt"
@@ -416,6 +436,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         ])
     }
 
+
+    //
+    // - Plugin Methods (JS Interfaces), requestPermissions to enable all permission for the plugin to run
+    // 
     @objc public override func requestPermissions(_ call: CAPPluginCall) {
         let permissions = call.getArray("permissions", String.self) ?? []
         
@@ -454,6 +478,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
     }
 
+
+    //
+    // - locationManager strategy management
+    // 
     public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
         let now = Date()
@@ -545,8 +573,9 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     }
 
    
-
-    // Process end
+    //
+    // Process end of trip
+    // 
     private func forceStopDriving() {
         // 0. lock to prevent // processing
         activityLock.lock()
@@ -591,14 +620,16 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         // 6. upload with small delay
         DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 0.5) {
             // TEST VERSION COMMENT BEGIN
-            //self.processAndUploadAutomotiveTripsOnly()
+            self.processAndUploadAutomotiveTripsOnly()
             // TEST VERSION COMMENT END
         }
         
         print("✅ End of driving logic completed")
     }
 
-    // MARK: - Saving & JSON
+    //
+    // Saving to JSON
+    //
     private func saveLocationToJSON(_ locationData: [String: Any]) {
 
         fileAccessLock.lock()
@@ -635,6 +666,9 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
     }
 
+    //
+    // load points from file
+    //
     private func loadStoredPoints() -> [[String: Any]] {
         let url = getFilePath()
         guard let content = try? String(contentsOf: url, encoding: .utf8) else {
@@ -653,12 +687,17 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
     }
 
+    //
+    // retrieve file path
+    //
     private func getFilePath() -> URL {
         return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(fileName)
     }
 
-
+    //
+    // - Plugin Methods (JS Interfaces), shareSavedLocations share event / location file through nativ UI
+    // 
     @objc func shareSavedLocations(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
             let fileURL = self.getFilePath()
@@ -693,60 +732,100 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     }
 
 
-    @objc public func purgeLocationsBefore(_ call: CAPPluginCall) {
-        // Récupération du timestamp limite (en ms) envoyé par le JS
-        guard let timestampLimit = call.getDouble("timestamp") else {
-            call.reject("Le paramètre 'timestamp' est manquant ou invalide")
-            return
-        }
+    //
+    // - Plugin Methods (JS Interfaces), purgeLocationsBefore purge begining of file when processed for upload
+    // 
+    @objc func purgeLocationsBefore(_ call: CAPPluginCall) {
+        // Supporte 'timestamp' ou 'before' pour être flexible
+        let timestamp = call.getDouble("timestamp") ?? call.getDouble("before")
         
-        let url = getFilePath()
-        
-        // no more file nothing to purge
-        guard FileManager.default.fileExists(atPath: url.path) else {
+        if let ts = timestamp {
+            self.performPurgeBefore(timestamp: ts)
             call.resolve()
-            return
+        } else {
+            call.reject("Parameter 'timestamp' is mandatory")
         }
+    }
+
+    //
+    // - Plugin Methods (JS Interfaces), purgeLocationsBetween purge event/location between trips
+    // 
+    @objc func purgeLocationsBetween(_ call: CAPPluginCall) {
+        let from = call.getDouble("from")
+        let to = call.getDouble("to")
         
-        do {
-            // 1. Read JSONL file
-            let content = try String(contentsOf: url, encoding: .utf8)
-            let lines = content.components(separatedBy: .newlines)
-            
-            // 2. Filter lines
-            let filteredLines = lines.filter { line in
-                // empty lines ignored
-                if line.trimmingCharacters(in: .whitespaces).isEmpty { return false }
-                
-                guard let data = line.data(using: .utf8),
-                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let pointTimestamp = json["timestamp"] as? Double else {
-                    // bad line discarded (security)
-                    return false
-                }
-                
-                // keep more recent or equal timestamp
-                return pointTimestamp >= timestampLimit
-            }
-            
-            // 3. Rebuild content (JSONL)
-            let newContent = filteredLines.joined(separator: "\n") + (filteredLines.isEmpty ? "" : "\n")
-            
-            // 4. atomic writing to prevent file corruption in case of crash
-            try newContent.write(to: url, atomically: true, encoding: .utf8)
-            
-            print("🧹 iOS Purge : \(lines.count - filteredLines.count) points supprimés")
+        if let f = from, let t = to {
+            self.performPurgeBetween(from: f, to: t)
             call.resolve()
-            
-        } catch {
-            call.reject("Error during purge : \(error.localizedDescription)")
+        } else {
+            call.reject("Parameters 'from' and 'to' are mandatory")
         }
     }
 
 
+    //
+    // - Process purgeLocationsBefore purge begining of file when processed for upload
+    // 
+    private func performPurgeBefore(timestamp: Double) {
+        fileAccessLock.lock()
+        defer { fileAccessLock.unlock() }
+        
+        let fileURL = getFilePath()
+        var allEntries = self.loadLocationsFromFile(url: fileURL)
+        
+        let countBefore = allEntries.count
+        // Utilisation d'une conversion sécurisée Double(truncating:) ou cast via NSNumber
+        allEntries = allEntries.filter { entry in
+            let entryTs = (entry["timestamp"] as? NSNumber)?.doubleValue ?? 0.0
+            return entryTs >= timestamp
+        }
+        
+        self.saveLocationsToFile(allEntries, url: fileURL)
+        print("🧹 Purge Before: \(countBefore - allEntries.count) éléments supprimés.")
+    }
 
     //
-    // Sync entry called from js
+    // - Process performPurgeBetween purge event/location between trips
+    // 
+    private func performPurgeBetween(from: Double, to: Double) {
+        fileAccessLock.lock()
+        defer { fileAccessLock.unlock() }
+        
+        let fileURL = getFilePath()
+        var allEntries = self.loadLocationsFromFile(url: fileURL)
+        
+        let countBefore = allEntries.count
+        allEntries = allEntries.filter { entry in
+            let entryTs = (entry["timestamp"] as? NSNumber)?.doubleValue ?? 0.0
+            return entryTs < from || entryTs > to
+        }
+        
+        self.saveLocationsToFile(allEntries, url: fileURL)
+        print("🧹 Purge Between: \(countBefore - allEntries.count) éléments supprimés.")
+    }
+
+
+    //
+    // - Process saveLocationsToFile 
+    // 
+    private func saveLocationsToFile(_ locations: [[String: Any]], url: URL) {
+        var combinedString = ""
+        for location in locations {
+            if let data = try? JSONSerialization.data(withJSONObject: location, options: []),
+               let jsonString = String(data: data, encoding: .utf8) {
+                combinedString += jsonString + "\n" // Important : le \n pour le format JSON Lines
+            }
+        }
+        
+        do {
+            try combinedString.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            print("❌ iOS: Erreur sauvegarde locations : \(error.localizedDescription)")
+        }
+    }
+
+    //
+    // - Plugin Methods (JS Interfaces), Sync trips from js
     //
     @objc public func forceUpload(_ call: CAPPluginCall) {
         syncLock.lock()
@@ -786,119 +865,86 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     // Upload to server process from JS and end of trip entry
     //
     private func executeInternalSync(completion: (() -> Void)? = nil) {
-        // 1. Déclarer une tâche de background pour empêcher iOS de suspendre l'app
+        // 1. Background Task
         var bgTask: UIBackgroundTaskIdentifier = .invalid
         bgTask = UIApplication.shared.beginBackgroundTask {
-            // Si iOS nous coupe le temps, on nettoie proprement
             UIApplication.shared.endBackgroundTask(bgTask)
             bgTask = .invalid
         }
 
         let fileURL = getFilePath()
-        let processingURL = fileURL.deletingLastPathComponent().appendingPathComponent("processing_locations.json")
 
-        // --- PHASE ATOMIQUE : ISOLATION DES DONNÉES ---
+        // 2. Lecture (Phase critique)
         fileAccessLock.lock()
-        
-        // Si le fichier n'existe pas, on arrête tout de suite
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            fileAccessLock.unlock()
-            self.releaseSync()
-            UIApplication.shared.endBackgroundTask(bgTask)
-            completion?()
-            return
-        }
-
-        do {
-            // On nettoie un éventuel résidu de crash précédent
-            if FileManager.default.fileExists(atPath: processingURL.path) {
-                try FileManager.default.removeItem(at: processingURL)
-            }
-            // ON DÉPLACE : Le fichier source devient vide pour le GPS
-            try FileManager.default.moveItem(at: fileURL, to: processingURL)
-        } catch {
-            print("❌ Erreur MoveItem: \(error)")
-            fileAccessLock.unlock()
-            self.releaseSync()
-            UIApplication.shared.endBackgroundTask(bgTask)
-            completion?()
-            return
-        }
+        let allEntries = self.loadLocationsFromFile(url: fileURL)
         fileAccessLock.unlock()
-        // --- FIN DE LA PHASE CRITIQUE ---
 
-        // 2. Lecture du fichier isolé (processing_locations.json)
-        let allEntries = self.loadLocationsFromFile(url: processingURL)
-        
         guard !allEntries.isEmpty else {
-            try? FileManager.default.removeItem(at: processingURL)
             self.releaseSync()
             UIApplication.shared.endBackgroundTask(bgTask)
             completion?()
             return
         }
 
-        // 3. Traitement et Découpage (Segmentation)
+        // 3. Segmentation Look-ahead
+        let FIVE_MINUTES_MS: Double = 5 * 60 * 1000
+        let MIN_DURATION_MS: Double = 30 * 1000
         var finishedTrips = [[[String: Any]]]()
-        var currentSegment = [[String: Any]]()
-        var isInsideAutomotive = false
-        var lastProcessedIndex = -1
-        
-        let GRACE_TIMER_MS: Double = 10 * 60 * 1000 // 10 minutes (Sécurité iOS)
-        let SPEED_THRESHOLD = 1.7 
+        var currentMeasures = [[String: Any]]()
+        var isTrackingAutomotive = false
 
         for (index, entry) in allEntries.enumerated() {
             let type = entry["type"] as? String ?? ""
             let activity = entry["activity"] as? String ?? ""
             let transition = entry["transition"] as? String ?? ""
             let timestamp = entry["timestamp"] as? Double ?? 0
-            let speed = entry["speed"] as? Double ?? 0
 
-            if type == "activity" && activity == "automotive" && transition == "ENTER" {
-                isInsideAutomotive = true
-            }
+            if type == "activity" && activity == "automotive" {
+                if transition == "ENTER" && !isTrackingAutomotive {
+                    isTrackingAutomotive = true
+                    currentMeasures = []
+                }
 
-            if isInsideAutomotive {
-                currentSegment.append(entry)
-            }
+                if transition == "EXIT" && isTrackingAutomotive {
+                    var hasReEntered = false
+                    if index < allEntries.count - 1 {
+                        for j in (index + 1)..<allEntries.count {
+                            let next = allEntries[j]
+                            if ((next["timestamp"] as? Double ?? 0) - timestamp) > FIVE_MINUTES_MS { break }
+                            if (next["type"] as? String) == "activity" && (next["activity"] as? String) == "automotive" && (next["transition"] as? String) == "ENTER" {
+                                hasReEntered = true
+                                break
+                            }
+                        }
+                    }
 
-            var shouldCloseTrip = false
-            if type == "activity" && activity == "automotive" && transition == "EXIT" {
-                shouldCloseTrip = true
-            } else if isInsideAutomotive && index < allEntries.count - 1 {
-                let nextEntry = allEntries[index + 1]
-                let nextTimestamp = nextEntry["timestamp"] as? Double ?? 0
-                if (nextTimestamp - timestamp) > GRACE_TIMER_MS && speed < SPEED_THRESHOLD {
-                    shouldCloseTrip = true
+                    if !hasReEntered {
+                        if !currentMeasures.isEmpty {
+                            let duration = (currentMeasures.last?["timestamp"] as? Double ?? 0) - (currentMeasures.first?["timestamp"] as? Double ?? 0)
+                            if duration >= MIN_DURATION_MS && isTripSignificant(trip: currentMeasures) {
+                                 finishedTrips.append(currentMeasures)
+                            }
+                        }
+                        isTrackingAutomotive = false
+                        currentMeasures = []
+                    }
                 }
             }
 
-            if shouldCloseTrip && !currentSegment.isEmpty {
-                var cleaned = trimPedestrianStart(currentSegment, speedThreshold: SPEED_THRESHOLD)
-                cleaned = trimPedestrianEnd(cleaned, speedThreshold: SPEED_THRESHOLD)
-                if isTripSignificant(trip: cleaned) {
-                    finishedTrips.append(cleaned)
-                }
-                currentSegment = []
-                isInsideAutomotive = false
-                lastProcessedIndex = index
-            }
-            if !isInsideAutomotive { lastProcessedIndex = index }
-        }
-
-        // 4. Identification des résidus (Trajet non fini)
-        var remainingData = [[String: Any]]()
-        if lastProcessedIndex < allEntries.count - 1 {
-            for i in (lastProcessedIndex + 1)..<allEntries.count {
-                remainingData.append(allEntries[i])
+            if type == "location" && isTrackingAutomotive {
+                currentMeasures.append([
+                    "lat": entry["lat"] ?? 0.0,
+                    "lng": entry["lng"] ?? 0.0,
+                    "speed": entry["speed"] ?? 0.0,
+                    "timestamp": timestamp,
+                    "type": "location"
+                ])
             }
         }
 
-        // 5. Upload Séquentiel
-        self.uploadTripsSequentially(tripsToUpload: finishedTrips, remainingData: remainingData) {
-            // Nettoyage final après succès ou mise en échec gérée
-            try? FileManager.default.removeItem(at: processingURL)
-            
+        // 4. Lancement de l'Upload séquentiel avec purge intégrée
+        self.uploadTripsSequentially(tripsToUpload: finishedTrips) {
+            // Callback final une fois que tous les trajets de la file sont traités
             self.releaseSync()
             UIApplication.shared.endBackgroundTask(bgTask)
             bgTask = .invalid
@@ -906,29 +952,32 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
     }
 
+    //
+    // Load location from file as json string
+    //
     private func loadLocationsFromFile(url: URL) -> [[String: Any]] {
-        var locations = [[String: Any]]()
-        
-        // Vérifier si le fichier existe avant de tenter la lecture
         guard FileManager.default.fileExists(atPath: url.path) else { return [] }
         
         do {
             let data = try String(contentsOf: url, encoding: .utf8)
             let lines = data.components(separatedBy: .newlines)
             
-            for line in lines {
-                if line.isEmpty { continue }
-                if let lineData = line.data(using: .utf8),
-                   let json = try? JSONSerialization.jsonObject(with: lineData, options: []) as? [String: Any] {
-                    locations.append(json)
+            return lines.compactMap { line in
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty { return nil }
+                
+                guard let lineData = trimmed.data(using: .utf8),
+                      let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                    return nil
                 }
+                return json
             }
         } catch {
-            print("❌ Erreur lecture fichier processing : \(error.localizedDescription)")
+            print("❌ Erreur lecture: \(error.localizedDescription)")
+            return []
         }
-        
-        return locations
     }
+
 
     //
     // release sync, utils
@@ -941,7 +990,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
 
     //
-    // remove pedestian segments, check pedestrian start
+    // remove pedestian segments, check pedestrian start (currently not used)
     //
     private func trimPedestrianStart(_ trip: [[String: Any]], speedThreshold: Double) -> [[String: Any]] {
         var firstMotorizedIndex = -1
@@ -973,7 +1022,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
 
     //
-    // remove pedestian segments, check pedestrian end
+    // remove pedestian segments, check pedestrian end (currently not used)
     //
     private func trimPedestrianEnd(_ trip: [[String: Any]], speedThreshold: Double) -> [[String: Any]] {
         var lastMotorizedIndex = -1
@@ -1001,7 +1050,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
    
 
     //
-    // check if trip muste be kept or not
+    // check if trip must be kept or not
     //
     private func isTripSignificant(trip: [[String: Any]]) -> Bool {
         
@@ -1041,63 +1090,41 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     //
     // Loops inside trips array to send them to server
     //
-    private func uploadTripsSequentially(tripsToUpload: [[[String: Any]]], remainingData: [[String: Any]], completion: @escaping () -> Void) {
+    private func uploadTripsSequentially(tripsToUpload: [[[String: Any]]], index: Int = 0, completion: @escaping () -> Void) {
+    
+        if index == 0 { self.hasPerformedFirstPurgeInSession = false }
+
+        // all trips processed?
+        guard index < tripsToUpload.count else {
+            completion()
+            return
+        }
+
+        let trip = tripsToUpload[index]
         
-        var tripsToRetry = [[[String: Any]]]() // keep only those who need a retry
-        var queue = tripsToUpload
+        // purge timeStamp info
+        let tripStart = trip.first?["timestamp"] as? Double ?? 0
+        let tripEnd = trip.last?["timestamp"] as? Double ?? 0
 
-        func uploadNext() {
-            guard !queue.isEmpty else {
-                // uploads trys : failed and trip in progress
-                self.finalizeLocalStorage(failedTrips: tripsToRetry, remainingData: remainingData)
-                completion()
-                return
-            }
-
-            let trip = queue.removeFirst()
-            
-            // --- API Upload call ---
-            self.uploadTripToServer(points: trip) { success in
-                if !success {
-                    print("❌ Trip upload failed, keeping in local")
-                    tripsToRetry.append(trip) // retry next time
+        // --- APPEL API NATIF ---
+        self.uploadTripToServer(points: trip) { success in
+            if success {
+                print("✅ iOS: Upload done for trip \(index + 1)")
+                
+                if !self.hasPerformedFirstPurgeInSession {
+                    // first trip clean all before
+                    self.performPurgeBefore(timestamp: tripEnd + 1)
+                    self.hasPerformedFirstPurgeInSession = true
                 } else {
-                    print("✅ Trip upload success")
+                    // begin file already purged purge between now.
+                    self.performPurgeBetween(from: tripStart - 1, to: tripEnd + 1)
                 }
-                uploadNext()
+            } else {
+                print("❌ iOS: Échec trajet \(index + 1), conservé dans le fichier.")
             }
-        }
-
-        uploadNext()
-    }
-
-    private func finalizeLocalStorage(failedTrips: [[[String: Any]]], remainingData: [[String: Any]]) {
-        let dataToPutBack = failedTrips.flatMap { $0 } + remainingData
-        guard !dataToPutBack.isEmpty else { return }
-
-        let fileURL = getFilePath()
-        
-        // On reverrouille pour l'écriture physique
-        fileAccessLock.lock()
-        defer { fileAccessLock.unlock() }
-
-        // On utilise un FileHandle pour AJOUTER à la fin (Append) 
-        // plutot que d'écraser le fichier que le GPS utilise peut-être déjà
-        if !FileManager.default.fileExists(atPath: fileURL.path) {
-            FileManager.default.createFile(atPath: fileURL.path, contents: nil, attributes: nil)
-        }
-
-        if let fileHandle = try? FileHandle(forWritingTo: fileURL) {
-            fileHandle.seekToEndOfFile()
             
-            for point in dataToPutBack {
-                if var jsonData = try? JSONSerialization.data(withJSONObject: point, options: []) {
-                    jsonData.append(0x0A) // \n
-                    fileHandle.write(jsonData)
-                }
-            }
-            fileHandle.closeFile()
-            print("♻️ \(dataToPutBack.count) points ré-injectés dans le fichier principal (échec ou non fini).")
+            // loop all trips
+            self.uploadTripsSequentially(tripsToUpload: tripsToUpload, index: index + 1, completion: completion)
         }
     }
 
@@ -1165,50 +1192,29 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
         // 5. Exécution de l'envoi
         let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            let success: Bool
+            
             if let error = error {
                 print("❌ Erreur réseau iOS : \(error.localizedDescription)")
-                completion(false)
-                return
+                success = false
+            } else if let httpResponse = response as? HTTPURLResponse {
+                print("📡 iOS Response Code: \(httpResponse.statusCode)")
+                success = (200...299).contains(httpResponse.statusCode)
+            } else {
+                success = false
             }
 
-            if let httpResponse = response as? HTTPURLResponse {
-                print("📡 iOS Response Code: \(httpResponse.statusCode)")
-                completion((200...299).contains(httpResponse.statusCode))
-            } else {
-                completion(false)
+            // On force le retour sur le thread principal pour la suite de la boucle/purge
+            DispatchQueue.main.async {
+                completion(success)
             }
         }
         task.resume()
     }
 
-    private func getAllStoredLocations() -> [[String: Any]] {
-        let fileURL = getFilePath() // Utilise ta méthode existante getFilePath()
-        var locations: [[String: Any]] = []
-        
-        // On tente de lire le contenu du fichier
-        guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else {
-            return []
-        }
-        
-        // On découpe par ligne (format JSONL)
-        let lines = content.components(separatedBy: .newlines)
-        for line in lines where !line.isEmpty {
-            if let data = line.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                locations.append(json)
-            }
-        }
-        return locations
-    }
-
-
-    private func clearLocalJSON() {
-        let url = getFilePath()
-        try? FileManager.default.removeItem(at: url)
-        print("🗑️ Local JSON file cleared after successful upload.")
-    }
-
-
+    //
+    // - Plugin Methods (JS Interfaces), test if plugin set correctly (url/token)
+    //
     @objc func testSettings(_ call: CAPPluginCall) {
         // 1. Récupération des valeurs stockées que le plugin utilise réellement
         let urlString = UserDefaults.standard.string(forKey: "trip_server_url") ?? ""
@@ -1252,18 +1258,20 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         task.resume()
     }
 
+
+    //
+    // - Plugin Methods (JS Interfaces), test if syncing in progress
+    //
     @objc func isSyncing(_ call: CAPPluginCall) {
         call.resolve([
             "inProgress": self.syncInProgress
         ])
     }
 
-    // Helper pour ton service de synchro
-    func setSyncStatus(_ status: Bool) {
-        self.syncInProgress = status
-    }
 
-
+    //
+    // fetchWeatherData retrieve weather at a lat lon position
+    //
     private func fetchWeatherData(lat: Double, lon: Double) {
         // 1. Fetch only if necessary
         if let lastFetch = lastWeatherFetchDate, Date().timeIntervalSince(lastFetch) < weatherUpdateInterval {
@@ -1329,8 +1337,14 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         task.resume()
     }
 
-
+    //
+    // logToFile only in debug
+    //
     func logToFile(_ message: String) {
+
+        // do nothing if not debug mode
+        guard self.debugMode else {return}
+
         let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .medium)
         let logEntry = "\(timestamp) : \(message)\n"
         

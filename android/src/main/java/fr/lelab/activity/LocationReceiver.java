@@ -33,8 +33,8 @@ public class LocationReceiver extends BroadcastReceiver {
             }
 
             
-            // On appelle saveLocation une seule fois. 
-            // Si currentWeather est null, la méthode saveLocation le gérera proprement.
+            // call saveLocation once. 
+            // if currentWeather === null, saveLocation manage properly
             JsonStorageHelper.saveLocation(
                 safeContext, 
                 location.getLatitude(), 

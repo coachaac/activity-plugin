@@ -37,7 +37,7 @@ import com.getcapacitor.PermissionState;
             strings = { Manifest.permission.ACTIVITY_RECOGNITION }
         ),
         @Permission(
-            alias = "location", // Alias standard pour la position au premier plan
+            alias = "location", // foreground location alias
             strings = { 
                 Manifest.permission.ACCESS_FINE_LOCATION, 
                 Manifest.permission.ACCESS_COARSE_LOCATION 
@@ -62,7 +62,7 @@ public class ActivityRecognitionPlugin extends Plugin {
 
     public static final Object fileLock = new Object();
 
-    // --- HELPER : Stockage protégé pour le reboot (Direct Boot) ---
+    // --- HELPER : protected saving area for reboot (Direct Boot) ---
     private Context getSafeContext() {
         return (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) 
             ? getContext().createDeviceProtectedStorageContext() 
@@ -181,9 +181,8 @@ public class ActivityRecognitionPlugin extends Plugin {
 
     @PluginMethod
     public void requestPermissions(PluginCall call) {
-        // Si l'utilisateur demande le background sur Android 11+
-        // on peut ajouter une logique ici, mais Capacitor gère déjà 
-        // l'affichage des popups correspondantes aux alias déclarés dans l'annotation.
+        // if user request background on Android 11+
+        // logic can be added here but in capacitor alreday managed 
         super.requestPermissions(call);
     }
 
@@ -253,19 +252,18 @@ public class ActivityRecognitionPlugin extends Plugin {
         Log.d(TAG, "🚗 Stop Tracking");
 
         isDriving = false;
-        // Mise à jour de l'état "Inactif"
+        // Update inactive state
         getSafeContext().getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
             .edit().putBoolean("tracking_active", false)
             .putBoolean("driving_state", false).apply();
 
-        // Réinitialisation des filtres météo
+        // weather filtering reinitialisation
         SharedPreferences prefs = getContext().getSharedPreferences("tracking_prefs", Context.MODE_PRIVATE);
         SharedPreferences.Editor editor = prefs.edit();
         editor.remove("last_weather_lat");
         editor.remove("last_weather_lon");
         editor.apply();
 
-        // On arrête aussi les alarmes planifiées
         JsonStorageHelper.cancelWeatherUpdates(getContext());
 
         implementation.stopTracking();
@@ -276,7 +274,7 @@ public class ActivityRecognitionPlugin extends Plugin {
     public void getSavedLocations(PluginCall call) {
         Log.d(TAG, "🚗 getSavedLocations");
 
-        // Lecture dans le stockage sécurisé (Direct Boot Aware)
+        // read in protected area (Direct Boot Aware)
         JSArray locations = JsonStorageHelper.loadLocationsAsJSArray(getSafeContext());
         JSObject ret = new JSObject();
         ret.put("locations", locations);
@@ -381,7 +379,7 @@ public class ActivityRecognitionPlugin extends Plugin {
             String token = prefs.getString("jwt_token", null);
 
             if (url == null || url.trim().isEmpty() || token == null || token.trim().isEmpty()) {
-                call.reject("Configuration manquante (URL ou Token)");
+                call.reject("Missing Configuration (URL ou Token)");
                 return;
             }
 
@@ -393,8 +391,8 @@ public class ActivityRecognitionPlugin extends Plugin {
                 ret.put("status", "success");
                 call.resolve(ret);
             } catch (Exception e) {
-                Log.e("ActivityPlugin", "Erreur forceUpload: " + e.getMessage());
-                call.reject("Erreur lors de l'upload: " + e.getMessage());
+                Log.e("ActivityPlugin", "Error forceUpload: " + e.getMessage());
+                call.reject("upload error: " + e.getMessage());
             }
         } 
         
@@ -471,13 +469,13 @@ public class ActivityRecognitionPlugin extends Plugin {
 
         @PluginMethod
             public void testSettings(PluginCall call) {
-                // 1. Récupération des réglages depuis TripPrefs
+                // 1. get settings from TripPrefs
                 SharedPreferences prefs = getContext().getSharedPreferences("TripPrefs", Context.MODE_PRIVATE);
                 String savedUrl = prefs.getString("server_url", "");
                 String savedToken = prefs.getString("jwt_token", "");
 
                 if (savedUrl.isEmpty()) {
-                    call.reject("URL non configurée dans TripPrefs");
+                    call.reject("URL not set ins TripPrefs");
                     return;
                 }
 
@@ -515,8 +513,7 @@ public class ActivityRecognitionPlugin extends Plugin {
 
             @PluginMethod
             public void isSyncing(PluginCall call) {
-                // Cette variable doit être mise à jour par ton service d'upload
-                // Par exemple via une variable statique dans ton implémentation
+                
                 boolean syncing = JsonStorageHelper.syncInProgress; 
                 
                 JSObject ret = new JSObject();

@@ -84,40 +84,11 @@ public class JsonStorageHelper {
     }
 
 
-    /**
-     * Sauvegarde d'un log file 
-     */
-    public static void logToFile(Context context, String message) {
-        File logFile = new File(getSafeFilesDir(context), "debug_log.txt");
-        
-        // --- Auto-vide : Si le fichier dépasse 1 Mo (1024 * 1024 octets) ---
-        if (logFile.exists() && logFile.length() > 1024 * 1024) {
-            logFile.delete(); 
-            // On recrée le fichier avec une petite note
-            try (FileOutputStream fos = new FileOutputStream(logFile)) {
-                fos.write("--- Log reset (Taille max atteinte) ---\n".getBytes());
-            } catch (IOException ignored) {}
-        }
-
-        String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.FRANCE).format(new Date());
-        String entry = timestamp + " : " + message + "\n";
-        
-        try (FileOutputStream fos = new FileOutputStream(logFile, true)) {
-            fos.write(entry.getBytes());
-        } catch (IOException e) {
-            Log.e("DEBUG", "Error writing to debug log", e);
-        }
-    }
 
     /**
-     * Sauvegarde un changement d'activité
+     * Save Activity change
      */
     public static void saveActivity(Context context, String activityName, String transitionName) {
-        
-        // log during debug TO BE REMOVED START
-        String logString = "Activitée reçue: " + activityName + " transition: " +transitionName;
-        logToFile(context, logString);
-        // log during debug TO BE REMOVED END
 
         synchronized (ActivityRecognitionPlugin.fileLock) {
             File file = new File(getSafeFilesDir(context), FILE_NAME);
@@ -313,85 +284,120 @@ public class JsonStorageHelper {
                     allEntries.put(obj);
                 }
 
-                // 2. Segmentation des trajets
-                List<JSArray> finishedTrips = new ArrayList<>();
-                JSArray currentSegment = new JSArray();
-                boolean isInsideAutomotive = false;
-                int lastProcessedIndex = -1;
+                // Configuration
+                long FIVE_MINUTES_MS = 5 * 60 * 1000;
+                long MIN_DURATION_MS = 30 * 1000;
 
-                long GRACE_TIMER_MS = 3 * 60 * 1000; // 3 minutes
-                double SPEED_THRESHOLD = 1.7;        // ~6-8 km/h
+                List<JSArray> finishedTrips = new ArrayList<>();
+                JSArray currentMeasures = new JSArray();
+                boolean isTrackingAutomotive = false;
 
                 for (int i = 0; i < allEntries.length(); i++) {
-                    JSONObject entry = allEntries.getJSONObject(i);
-                    String type = entry.optString("type", "");
-                    String activity = entry.optString("activity", "");
-                    String transition = entry.optString("transition", "");
-                    long timestamp = entry.optLong("timestamp", 0);
-                    double speed = entry.optDouble("speed", 0);
+                    JSONObject current = allEntries.getJSONObject(i);
+                    String type = current.optString("type");
+                    String activity = current.optString("activity");
+                    String transition = current.optString("transition");
+                    long timestamp = current.optLong("timestamp");
 
-                    if ("activity".equals(type) && "automotive".equals(activity) && "ENTER".equals(transition)) {
-                        isInsideAutomotive = true;
-                    }
+                    // 1. Manage activity state
+                    if ("activity".equals(type) && "automotive".equals(activity)) {
 
-                    if (isInsideAutomotive) {
-                        currentSegment.put(entry);
-                    }
+                        // ENTER : start tracking automotive
+                        if ("ENTER".equals(transition) && !isTrackingAutomotive) {
+                            isTrackingAutomotive = true;
+                            currentMeasures = new JSArray(); // Reset array pour nouveau trajet
+                        }
 
-                    boolean shouldCloseTrip = false;
-                    if ("activity".equals(type) && "automotive".equals(activity) && "EXIT".equals(transition)) {
-                        shouldCloseTrip = true;
-                    } else if (isInsideAutomotive && i < allEntries.length() - 1) {
-                        JSONObject nextEntry = allEntries.getJSONObject(i + 1);
-                        long gap = nextEntry.optLong("timestamp", 0) - timestamp;
-                        if (gap > GRACE_TIMER_MS && speed < SPEED_THRESHOLD) {
-                            shouldCloseTrip = true;
+                        // EXIT : "Bad Stop verification"
+                        if ("EXIT".equals(transition) && isTrackingAutomotive) {
+                            boolean hasReEntered = false;
+
+                            for (int j = i + 1; j < allEntries.length(); j++) {
+                                JSONObject next = allEntries.getJSONObject(j);
+                                long nextTs = next.optLong("timestamp");
+
+                                // Si on dépasse le délai de 5 min, on arrête de chercher
+                                if ((nextTs - timestamp) > FIVE_MINUTES_MS) break;
+
+                                if ("activity".equals(next.optString("type")) &&
+                                    "automotive".equals(next.optString("activity")) &&
+                                    "ENTER".equals(next.optString("transition"))) {
+                                    hasReEntered = true;
+                                    break;
+                                }
+                            }
+
+                            if (!hasReEntered) {
+                                // --- End trip validated ---
+                                if (currentMeasures.length() > 0) {
+                                    long firstTs = currentMeasures.getJSONObject(0).optLong("timestamp");
+                                    long lastTs = currentMeasures.getJSONObject(currentMeasures.length() - 1).optLong("timestamp");
+                                    long duration = lastTs - firstTs;
+
+                                    if (duration >= MIN_DURATION_MS) {
+                                        // clone to add to already finished trips
+                                        finishedTrips.add(currentMeasures);
+                                    }
+                                }
+                                // Reset complet
+                                isTrackingAutomotive = false;
+                                currentMeasures = new JSArray();
+                            }
                         }
                     }
 
-                    if (shouldCloseTrip && currentSegment.length() > 0) {
-                        JSArray cleaned = trimPedestrianStart(currentSegment, SPEED_THRESHOLD);
-                        cleaned = trimPedestrianEnd(cleaned, SPEED_THRESHOLD);
+                    // 2. Add location point if in automotive mode 
+                    if ("location".equals(type) && isTrackingAutomotive) {
+                        JSONObject measure = new JSONObject();
+                        measure.put("lat", current.optDouble("lat"));
+                        measure.put("lng", current.optDouble("lng"));
+                        measure.put("speed", current.optDouble("speed"));
+                        measure.put("timestamp", timestamp);
+                        measure.put("type", "location");
+                        
+                        currentMeasures.put(measure);
+                    }
+                }
 
-                        if (isTripSignificant(cleaned)) {
-                            finishedTrips.add(cleaned);
+                // 'finishedTrips' contain all trips ready to upload
+
+                int tripNumber = 1;
+
+                for (JSArray tripMeasures : finishedTrips) {
+                    try {
+                        if (tripMeasures.length() == 0) continue;
+
+                        // 1. gets timestamps for purge
+                        JSONObject firstPoint = tripMeasures.getJSONObject(0);
+                        JSONObject lastPoint = tripMeasures.getJSONObject(tripMeasures.length() - 1);
+                        
+                        long tripStart = firstPoint.getLong("timestamp");
+                        long tripEnd = lastPoint.getLong("timestamp");
+
+                        // 2. Try to upload
+                        boolean success = uploadSingleTrip(serverUrl, token, tripMeasures);
+
+                        if (success) {
+                            Log.d(TAG, "✅ Trip sent Success" + tripNumber);
+
+                            if (tripNumber == 1) {
+                                JsonStorageHelper.purgeLocationsBefore(context, tripEnd + 1);
+                            } else {
+                                JsonStorageHelper.purgeLocationsBetween(context, tripStart - 1, tripEnd + 1);
+                            }
+                        } else {
+                            Log.e(TAG, "❌ fail to upload trip starting at : " + tripStart + ". Remains in file.");
                         }
-                        currentSegment = new JSArray();
-                        isInsideAutomotive = false;
-                        lastProcessedIndex = i; // On marque jusqu'où on a "consommé"
+
+                    } catch (Exception e) {
+                        Log.e(TAG, "💥 Error during trip processing " + tripNumber + ": " + e.getMessage());
                     }
+                    
+                    tripNumber++;
                 }
-
-                // 3. Tentative d'Upload et gestion des échecs
-                List<JSArray> failedTrips = new ArrayList<>();
-                for (JSArray trip : finishedTrips) {
-                    boolean success = uploadSingleTrip(serverUrl, token, trip);
-                    if (!success) {
-                        Log.w(TAG, "⚠️ Échec upload d'un trajet, sera conservé pour plus tard.");
-                        failedTrips.add(trip);
-                    }
-                }
-
-                // 4. Reconstruction du fichier avec les données à conserver
-                JSArray dataToKeep = new JSArray();
-
-                // A. On remet les trajets qui ont échoué
-                for (JSArray failed : failedTrips) {
-                    for (int j = 0; j < failed.length(); j++) {
-                        dataToKeep.put(failed.get(j));
-                    }
-                }
-
-                // B. On ajoute tout ce qui n'a pas été traité (trajet en cours ou data post-segmentation)
-                for (int k = lastProcessedIndex + 1; k < allEntries.length(); k++) {
-                    dataToKeep.put(allEntries.get(k));
-                }
-
-                // Réécriture physique du fichier
-                rewriteFileWithRemainingData(context, dataToKeep);
 
             } catch (Exception e) {
-                Log.e(TAG, "❌ Erreur durant le traitement : ", e);
+                Log.e(TAG, "❌ Error during processing : ", e);
             } finally {
                 syncInProgress = false;
             }
@@ -401,7 +407,7 @@ public class JsonStorageHelper {
     private static JSArray trimPedestrianStart(JSArray trip, double speedThreshold) throws JSONException {
         int firstMotorizedIndex = -1;
 
-        // On cherche le premier point où l'on roule vraiment
+        // get first real automotive point
         for (int i = 0; i < trip.length(); i++) {
             JSONObject step = trip.getJSONObject(i);
             String activity = step.optString("activity", "");
@@ -427,7 +433,7 @@ public class JsonStorageHelper {
             }
             return cleaned;
         }
-        return new JSArray(); // Si rien de moteur n'est trouvé, on vide
+        return new JSArray(); // if no automotive --> empty
     }
 
     private static double calculateDistance(double lat1, double lon1, double lat2, double lon2) {
@@ -476,14 +482,13 @@ public class JsonStorageHelper {
         // SEUILS : > 500m ET > 60s ET vitesse moyenne > 7km/h (2.0 m/s)
         boolean significant = (totalDistance > 500 && durationSeconds > 60 && averageSpeedMS > 2.0);
         
-        if (!significant) Log.d(TAG, "🗑️ Trajet ignoré (trop court ou trop lent)");
+        if (!significant) Log.d(TAG, "🗑️ Trip ignored (too small or not fast enough)");
         
         return significant;
     }
 
     /**
-     * Parcourt le segment et supprime tous les points au début 
-     * tant qu'on n'a pas détecté de mouvement motorisé.
+     * Suppress point if not detected automotive 
      */
     private static JSArray trimPedestrianEnd(JSArray trip, double speedThreshold) throws JSONException {
         int lastMotorizedIndex = -1;
@@ -513,7 +518,7 @@ public class JsonStorageHelper {
     }
 
     /**
-     * Envoi HTTP POST d'un trajet
+     *  HTTP POST for a trip
      */
    private static boolean uploadSingleTrip(String urlStr, String token, JSArray tripData) {
         try {
@@ -563,6 +568,7 @@ public class JsonStorageHelper {
             conn.setRequestProperty("Accept", "application/json");
             conn.setDoOutput(true);
             conn.setConnectTimeout(15000);
+            conn.setReadTimeout(15000);
 
             // 3. Envoi du JSON
             try (OutputStream os = conn.getOutputStream()) {

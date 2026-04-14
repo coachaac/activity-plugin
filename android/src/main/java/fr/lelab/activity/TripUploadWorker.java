@@ -37,9 +37,9 @@ public class TripUploadWorker extends Worker {
             JsonStorageHelper.processAndUploadAutomotiveTrips(context, url, token);
             return Result.success();
         } catch (Exception e) {
-            Log.e(TAG, "❌ Exception durant process: " + e.getMessage());
+            Log.e(TAG, "❌ Exception during process: " + e.getMessage());
             e.printStackTrace();
-            return Result.retry();
+            return Result.failure();
         }
     }
 }

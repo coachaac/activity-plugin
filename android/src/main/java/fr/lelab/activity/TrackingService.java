@@ -48,13 +48,13 @@ public class TrackingService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         SharedPreferences prefs = getSafeContext().getSharedPreferences("CapacitorStorage", MODE_PRIVATE);
         
-        // 1. On détermine l'état souhaité (soit via l'Intent, soit via les Prefs au reboot)
+        // 1. set state(either via l'Intent, or via Prefs au reboot)
         String action = (intent != null) ? intent.getAction() : null;
         boolean shouldBeDriving = prefs.getBoolean("driving_state", false);
 
         Log.d("TrackingService", "🔍 Intent Received - Action: " + action);
 
-        // Gestion du cas spécifique UPDATE_NOTIF
+        // UPDATE_NOTIF depending on state
         if (intent != null && "fr.lelab.activity.UPDATE_NOTIF".equals(action)) {
             String stateExtra = intent.getStringExtra(EXTRA_STATE);
             if (stateExtra != null) {
@@ -62,7 +62,7 @@ public class TrackingService extends Service {
             }
         }
 
-        // 2. Sécurité Reboot : Si le système relance le service (intent null) mais qu'on n'était pas en trajet
+        // 2. Security Reboot : if system launch the service (intent null) but not in automotive
         if (intent == null && !shouldBeDriving) {
             Log.d("TrackingService", "⚠️ Relaunch system outside automotive, Stop.");
             stopSelf();
@@ -86,9 +86,9 @@ public class TrackingService extends Service {
         } catch (Exception e) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && 
                 e instanceof ForegroundServiceStartNotAllowedException) {
-                Log.e("TrackingService", "Lancement interdit en arrière-plan : " + e.getMessage());
+                Log.e("TrackingService", "Background lauche not authorized : " + e.getMessage());
             }
-            // On arrête le service proprement pour éviter de laisser un service "fantôme" sans notification
+            // Stop service to prevent shadow services
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -122,10 +122,10 @@ public class TrackingService extends Service {
             PendingIntent pendingIntent = null;
             
             if (intent != null) {
-                // FLAG_ACTIVITY_SINGLE_TOP évite de recréer une nouvelle instance si l'app est déjà ouverte
+                // FLAG_ACTIVITY_SINGLE_TOP prevent to create nerw instance if app already opened
                 intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
                 
-                // FLAG_IMMUTABLE est requis pour Android 12+ (API 31+)
+                // FLAG_IMMUTABLE needed Android 12+ (API 31+)
                 pendingIntent = PendingIntent.getActivity(
                     this, 
                     0, 
@@ -204,14 +204,13 @@ public class TrackingService extends Service {
     public void onDestroy() {
         Log.d("TrackingService", "🛑 Service Destroyed");
         
-        // 1. On arrête le GPS proprement
+        // 1. Stop
         stopLocationUpdates();
         
-        // 2. On retire la notification de premier plan
-        // true = enlève aussi la notification de la barre d'état
+        // 2. remove notification
         stopForeground(true);
         
-        // 3. Sécurité supplémentaire pour nettoyer la notif
+        // 3. Aditionnal security to remove notification
         NotificationManager notificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (notificationManager != null) {
             notificationManager.cancel(NOTIFICATION_ID);
