@@ -36,7 +36,6 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     private let kIsTrackingActive = "tracking_active"
     private let kIsDrivingState = "driving_state"
 
-
     private var weatherApiKey: String?
     private var weatherBaseUrl: String?
 
@@ -515,7 +514,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             }
         }
 
-        // 2. Rfresh weather if already driving
+        // 2. Refresh weather if already driving
         if self.isDriving {
             // new weather after 10 min
             let weatherTimeThreshold: TimeInterval = 600 
@@ -897,7 +896,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             let type = entry["type"] as? String ?? ""
             let activity = entry["activity"] as? String ?? ""
             let transition = entry["transition"] as? String ?? ""
-            let timestamp = entry["timestamp"] as? Double ?? 0
+            let timestamp = (entry["timestamp"] as? NSNumber)?.doubleValue ?? 0
 
             if type == "activity" && activity == "automotive" {
                 if transition == "ENTER" && !isTrackingAutomotive {
@@ -919,26 +918,43 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
                     }
 
                     if !hasReEntered {
-                        if !currentMeasures.isEmpty {
-                            let duration = (currentMeasures.last?["timestamp"] as? Double ?? 0) - (currentMeasures.first?["timestamp"] as? Double ?? 0)
-                            if duration >= MIN_DURATION_MS && isTripSignificant(trip: currentMeasures) {
-                                 finishedTrips.append(currentMeasures)
+                        let firstTs = (currentMeasures.first?["timestamp"] as? Double) ?? 0
+                        let lastTs = (currentMeasures.last?["timestamp"] as? Double) ?? 0
+                        let duration = lastTs - firstTs
+                        
+                        // process distance
+                        let totalDistance = self.calculateTripDistance(points: currentMeasures)
+                        
+                        // CRITÈRES : + de 1 min ET + de 1000m
+                        if duration >= 60000 && totalDistance >= 1000 {
+                            if isTripSignificant(trip: currentMeasures) {
+                                finishedTrips.append(currentMeasures)
                             }
+                        } else {
+                
+                            print("⚠️ iOS: Ttrip too small (\(Int(totalDistance))m), purged immediatly.")
+                            self.performPurgeBetween(from: firstTs - 1, to: lastTs + 1)
                         }
-                        isTrackingAutomotive = false
-                        currentMeasures = []
+                    }
+                    isTrackingAutomotive = false
+                    currentMeasures = []
                     }
                 }
-            }
+            
 
             if type == "location" && isTrackingAutomotive {
-                currentMeasures.append([
+                var point: [String: Any] = [
                     "lat": entry["lat"] ?? 0.0,
                     "lng": entry["lng"] ?? 0.0,
                     "speed": entry["speed"] ?? 0.0,
                     "timestamp": timestamp,
                     "type": "location"
-                ])
+                ]
+                
+                if let temp = entry["weather_temp"] { point["weather_temp"] = temp }
+                if let wType = entry["weather_type"] { point["weather_type"] = wType }
+                
+                currentMeasures.append(point)
             }
         }
 
@@ -950,6 +966,23 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             bgTask = .invalid
             completion?()
         }
+    }
+
+
+    private func calculateTripDistance(points: [[String: Any]]) -> Double {
+        var totalDistance: Double = 0.0
+        var lastLoc: CLLocation?
+
+        for pt in points {
+            if let lat = pt["lat"] as? Double, let lng = pt["lng"] as? Double {
+                let currentLoc = CLLocation(latitude: lat, longitude: lng)
+                if let last = lastLoc {
+                    totalDistance += currentLoc.distance(from: last)
+                }
+                lastLoc = currentLoc
+            }
+        }
+        return totalDistance
     }
 
     //
