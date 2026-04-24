@@ -374,20 +374,34 @@ public class JsonStorageHelper {
                         long tripStart = firstPoint.getLong("timestamp");
                         long tripEnd = lastPoint.getLong("timestamp");
 
-                        // 2. Try to upload
-                        boolean success = uploadSingleTrip(serverUrl, token, tripMeasures);
+                        // do not process trip less than 1km or less than 1 min
 
-                        if (success) {
-                            Log.d(TAG, "✅ Trip sent Success" + tripNumber);
+                        if (isTripSignificant(tripMeasures)) {
 
+                            // 2. Try to upload
+                            boolean success = uploadSingleTrip(serverUrl, token, tripMeasures);
+
+                            if (success) {
+                                Log.d(TAG, "✅ Trip sent Success" + tripNumber);
+
+                                if (tripNumber == 1) {
+                                    JsonStorageHelper.purgeLocationsBefore(context, tripEnd + 1);
+                                } else {
+                                    JsonStorageHelper.purgeLocationsBetween(context, tripStart - 1, tripEnd + 1);
+                                }
+                            } else {
+                                Log.e(TAG, "❌ fail to upload trip starting at : " + tripStart + ". Remains in file.");
+                            }
+                        } else {
+                            // trjat not significant : purge witout upload
+                            Log.i(TAG, "⚠️ Trip ignored (too short)");
                             if (tripNumber == 1) {
                                 JsonStorageHelper.purgeLocationsBefore(context, tripEnd + 1);
                             } else {
                                 JsonStorageHelper.purgeLocationsBetween(context, tripStart - 1, tripEnd + 1);
                             }
-                        } else {
-                            Log.e(TAG, "❌ fail to upload trip starting at : " + tripStart + ". Remains in file.");
                         }
+
 
                     } catch (Exception e) {
                         Log.e(TAG, "💥 Error during trip processing " + tripNumber + ": " + e.getMessage());
