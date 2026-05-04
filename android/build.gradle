@@ -7,7 +7,7 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.2.1'
+        classpath 'com.android.tools.build:gradle:8.13.0'
     }
 }
 
@@ -15,10 +15,10 @@ apply plugin: 'com.android.library'
 
 android {
     namespace "fr.lelab.activity"
-    compileSdk 34 // Recommandé pour 2026 pour supporter Android 14/15
+    compileSdk 36
 
     defaultConfig {
-        minSdk 23
+        minSdk 24
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 

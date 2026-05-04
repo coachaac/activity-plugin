@@ -8,6 +8,9 @@ import AudioToolbox
 @objc(ActivityRecognitionPlugin)
 public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
+    private var saveOnlyAutomotive = true
+    private var isTrackingAutomotiveForSAve: Bool = false
+
     private var serverUrl: String?
     private var groupId: String?
     
@@ -631,6 +634,37 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     //
     private func saveLocationToJSON(_ locationData: [String: Any]) {
 
+        if self.saveOnlyAutomotive == true
+        {
+            let type = locationData["type"] as? String ?? ""
+            let activity = locationData["activity"] as? String ?? ""
+            let transition = locationData["transition"] as? String ?? ""
+
+            // --- 1. FILTRE DE SÉCURITÉ ---
+            
+            if type == "activity" {
+                // only automotiv managed as activity
+                if activity != "automotive" {
+                    return 
+                }
+
+                if transition == "ENTER" {
+                    self.isTrackingAutomotiveForSAve = true
+                } else if transition == "EXIT" {
+                    // EXIT automotiv is done but perpare end fater
+                    defer { self.isTrackingAutomotiveForSAve = false }
+                }
+            } else if type == "location" {
+                // poisition saved only in automotive
+                if !self.isTrackingAutomotiveForSAve {
+                    return
+                }
+            } else {
+                // other type no saved
+                return
+            }
+        }
+
         fileAccessLock.lock()
         defer { fileAccessLock.unlock() }
 
@@ -1001,12 +1035,21 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
                 
                 guard let lineData = trimmed.data(using: .utf8),
                       let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                    print("⚠️ corrupted JSON line ignored")
                     return nil
+                }
+                
+                // Verify mandatory fields exixt
+                if json["type"] as? String == "location" {
+                    if json["lat"] == nil || json["lng"] == nil || json["timestamp"] == nil {
+                        print("⚠️ bad GPS Point value --> ignored")
+                        return nil
+                    }
                 }
                 return json
             }
         } catch {
-            print("❌ Erreur lecture: \(error.localizedDescription)")
+            print("❌ file read error: \(error.localizedDescription)")
             return []
         }
     }
@@ -1167,7 +1210,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     //
     func uploadTripToServer(points: [[String: Any]], completion: @escaping (Bool) -> Void) {
     
-        // 1. Récupération des credentials (mémoire ou UserDefaults)
+        // 1. Récupération sécurisée des credentials
         let token = self.groupId ?? UserDefaults.standard.string(forKey: "group_id_token")
         let urlString = self.serverUrl ?? UserDefaults.standard.string(forKey: "trip_server_url")
 
@@ -1177,53 +1220,73 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             return
         }
 
-        // 2. Préparation du payload {"measures": [...]}
-        // On ne garde que les points GPS, on ignore les événements d'activité
+        // 2. Préparation et NETTOYAGE du payload
         let measures = points.compactMap { (dict) -> [String: Any]? in
+            // On vérifie que c'est une location et que les types de base sont OK
             guard let type = dict["type"] as? String, type == "location" else { return nil }
-            return [
-                "lat": dict["lat"] ?? 0.0,
-                "lng": dict["lng"] ?? 0.0,
-                "speed": dict["speed"] ?? 0.0,
-                "timestamp": dict["timestamp"] ?? 0
+            
+            // Extraction sécurisée avec valeurs par défaut
+            let lat = dict["lat"] as? Double ?? 0.0
+            let lng = dict["lng"] as? Double ?? 0.0
+            let speed = dict["speed"] as? Double ?? 0.0
+            let timestamp = (dict["timestamp"] as? NSNumber)?.int64Value ?? 0
+            
+            // --- LE BLINDAGE : Validation mathématique ---
+            // JSONSerialization crash sur NaN ou Infinity (souvent générés par le GPS si signal faible)
+            guard lat.isFinite, lng.isFinite, speed.isFinite else {
+                print("⚠️ Point ignoré : Valeur mathématique invalide (NaN/Inf)")
+                return nil
+            }
+            
+            // On reconstruit un dictionnaire propre
+            var cleanPoint: [String: Any] = [
+                "lat": lat,
+                "lng": lng,
+                "speed": max(0, speed), // Pas de vitesse négative
+                "timestamp": timestamp
             ]
+            
+            // Ajout optionnel de la météo uniquement si les types sont corrects
+            if let temp = dict["weather_temp"] as? Double, temp.isFinite { cleanPoint["weather_temp"] = temp }
+            if let wType = dict["weather_type"] as? String { cleanPoint["weather_type"] = wType }
+            
+            return cleanPoint
         }
 
-        // Si après filtrage le trajet est vide, on considère l'envoi "réussi" pour purger le fichier
         if measures.isEmpty {
-            print("ℹ️ Aucun point GPS trouvé dans ce segment (uniquement activité). Envoi ignoré.")
+            print("ℹ️ Aucun point GPS valide après nettoyage. Purge du fichier.")
             completion(true)
             return
         }
 
-        // Structure finale identique à Android
         let payload: [String: Any] = ["measures": measures]
 
-        // 3. Sérialisation JSON et Log limité pour Xcode
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: payload, options: []) else {
-            print("❌ Erreur de sérialisation JSON")
-            completion(false)
+        // 3. Sérialisation avec gestion d'erreur explicite
+        let jsonData: Data
+        do {
+            jsonData = try JSONSerialization.data(withJSONObject: payload, options: [])
+        } catch {
+            print("❌ CRITICAL : Échec sérialisation malgré le nettoyage : \(error.localizedDescription)")
+            // Si ça échoue encore, il y a un type non supporté dans le dictionnaire.
+            completion(false) 
             return
         }
 
-        let jsonString = String(data: jsonData, encoding: .utf8) ?? ""
-        if jsonString.count > 500 {
-            let start = String(jsonString.prefix(250))
-            let end = String(jsonString.suffix(100))
-            print("📤 iOS JSON (Large - \(jsonString.count) chars): \(start) ... [TRUNCATED] ... \(end)")
-        } else {
-            print("📤 iOS JSON: \(jsonString)")
+        // --- Log de debug ---
+        if let jsonString = String(data: jsonData, encoding: .utf8) {
+            let logMsg = jsonString.count > 500 ? "\(jsonString.prefix(250))..." : jsonString
+            print("📤 Envoi vers serveur (\(measures.count) points) : \(logMsg)")
         }
 
-        // 4. Configuration de la requête HTTP
+        // 4. Configuration de la requête
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
         request.httpBody = jsonData
-        request.timeoutInterval = 30 // Sécurité réseau
+        request.timeoutInterval = 30
 
-        // 5. Exécution de l'envoi
+        // 5. Exécution
         let task = URLSession.shared.dataTask(with: request) { data, response, error in
             let success: Bool
             
@@ -1231,13 +1294,13 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
                 print("❌ Erreur réseau iOS : \(error.localizedDescription)")
                 success = false
             } else if let httpResponse = response as? HTTPURLResponse {
-                print("📡 iOS Response Code: \(httpResponse.statusCode)")
+                print("📡 Status Code : \(httpResponse.statusCode)")
+                // Succès si 200, 201 ou 204
                 success = (200...299).contains(httpResponse.statusCode)
             } else {
                 success = false
             }
 
-            // On force le retour sur le thread principal pour la suite de la boucle/purge
             DispatchQueue.main.async {
                 completion(success)
             }

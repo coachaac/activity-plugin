@@ -35,6 +35,9 @@ import java.util.Scanner;
 
 public class JsonStorageHelper {
 
+    private static boolean saveOnlyAutomotive = true;
+    private static boolean isTrackingAutomotiveForSave = false;
+
     private static final String FILE_NAME = "stored_locations.json";
     private static final String TAG = "JsonStorageHelper";
 
@@ -58,6 +61,14 @@ public class JsonStorageHelper {
      * Save location APPEND mode
      */
     public static void saveLocation(Context context, double lat, double lng, float speed, JSObject weather) {
+
+        if (saveOnlyAutomotive)
+        {
+            if (!isTrackingAutomotiveForSave) {
+                return;
+            }
+        }
+
        synchronized (ActivityRecognitionPlugin.fileLock) {
            File file = new File(getSafeFilesDir(context), FILE_NAME);
             
@@ -89,6 +100,26 @@ public class JsonStorageHelper {
      * Save Activity change
      */
     public static void saveActivity(Context context, String activityName, String transitionName) {
+
+        if (saveOnlyAutomotive)
+        {
+            if (!"automotive".equalsIgnoreCase(activityName)) {
+                return;
+            }
+        }
+
+        // is inside ENTER/EXIT automotive?
+        if ("automotive".equalsIgnoreCase(activityName)) {
+
+            if ("ENTER".equalsIgnoreCase(transitionName)) {
+                isTrackingAutomotiveForSave = true;
+            }
+
+            if ("EXIT".equalsIgnoreCase(transitionName)) {
+                isTrackingAutomotiveForSave = false;
+            }
+        }
+
 
         synchronized (ActivityRecognitionPlugin.fileLock) {
             File file = new File(getSafeFilesDir(context), FILE_NAME);
