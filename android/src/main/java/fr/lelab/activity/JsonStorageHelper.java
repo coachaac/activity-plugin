@@ -2,6 +2,7 @@ package fr.lelab.activity;
 
 import android.app.AlarmManager;
 import android.app.PendingIntent;
+import android.content.SharedPreferences;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
@@ -36,14 +37,43 @@ import java.util.Scanner;
 public class JsonStorageHelper {
 
     private static boolean saveOnlyAutomotive = true;
-    private static boolean isTrackingAutomotiveForSave = false;
 
     private static final String FILE_NAME = "stored_locations.json";
     private static final String TAG = "JsonStorageHelper";
 
+    private static final String PREF_NAME = "ActivityPluginPrefs";
+    private static final String KEY_DRIVING = "driving_state";
+
+
     public static boolean syncInProgress = false;
 
     private static JSObject lastWeather = null;
+    
+    private static boolean lastLockStatus = true;
+
+    private static JSObject lastForegroundApp = null;
+
+    private static DistractionEventEmitter activeEmitter = null;
+
+    /**
+     * get/update driving state in persistent storage
+     */
+    public static boolean getDrivingState(Context context) {
+        Context safeContext = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) 
+            ? context.createDeviceProtectedStorageContext() : context;
+        SharedPreferences prefs = safeContext.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        return prefs.getBoolean(KEY_DRIVING, false);
+    }
+
+    public static void setDrivingState(Context context, boolean isDriving) {
+        Context safeContext = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) 
+            ? context.createDeviceProtectedStorageContext() : context;
+        safeContext.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_DRIVING, isDriving)
+                .commit(); // commit() immediate writing
+    }
+
 
     /**
     * Return Device Protected Storage
@@ -57,17 +87,30 @@ public class JsonStorageHelper {
     }
 
 
+    private static double sanitizeDouble(double value, double defaultValue) {
+        return (Double.isNaN(value) || Double.isInfinite(value)) ? defaultValue : value;
+    }
+
     /**
      * Save location APPEND mode
      */
-    public static void saveLocation(Context context, double lat, double lng, float speed, JSObject weather) {
+    public static void saveLocation(Context context, double lat, double lng, float speed, long timestamp, JSObject weather, JSObject appUsed, Boolean isDistraction) {
 
-        if (saveOnlyAutomotive)
-        {
-            if (!isTrackingAutomotiveForSave) {
+
+        if (Double.isNaN(lat) || Double.isNaN(lng)) {
+            Log.e(TAG, "❌ GPS point ignored :  NaN ");
+            return;
+        }
+
+        if (saveOnlyAutomotive) {
+            if (!getDrivingState(context)) {
                 return;
             }
         }
+
+        if (Float.isNaN(speed))
+            speed = 0;
+
 
        synchronized (ActivityRecognitionPlugin.fileLock) {
            File file = new File(getSafeFilesDir(context), FILE_NAME);
@@ -77,12 +120,24 @@ public class JsonStorageHelper {
             location.put("lat", lat);
             location.put("lng", lng);
             location.put("speed", speed);
-            location.put("date", getFormattedDate());
-            location.put("timestamp", System.currentTimeMillis());
+            location.put("timestamp", timestamp);
 
             if (weather != null) {
                 location.put("weather", weather);
             }
+
+            if (appUsed != null) {
+                location.put("appUsed", appUsed);
+            }
+
+            if (!getLockStatus()){
+                location.put("phoneUnlock", true);
+            }
+
+            if (isDistraction != null){
+                location.put("distractionDetect", isDistraction);
+            }
+
 
             String entry = location.toString() + "\n";
 
@@ -110,13 +165,11 @@ public class JsonStorageHelper {
 
         // is inside ENTER/EXIT automotive?
         if ("automotive".equalsIgnoreCase(activityName)) {
-
             if ("ENTER".equalsIgnoreCase(transitionName)) {
-                isTrackingAutomotiveForSave = true;
-            }
-
-            if ("EXIT".equalsIgnoreCase(transitionName)) {
-                isTrackingAutomotiveForSave = false;
+                setDrivingState(context, true);
+                Log.d(TAG, "🚗 Driving Mode: ON (Persistent)");
+            } else if ("EXIT".equalsIgnoreCase(transitionName)) {
+                Log.d(TAG, "🛑 Driving Mode: OFF (Persistent), but keep location until end of grace timer");
             }
         }
 
@@ -329,6 +382,7 @@ public class JsonStorageHelper {
                     String activity = current.optString("activity");
                     String transition = current.optString("transition");
                     long timestamp = current.optLong("timestamp");
+                    double speed = Double.isNaN(current.optDouble("speed")) ? 0.0 : current.optDouble("speed");
 
                     // 1. Manage activity state
                     if ("activity".equals(type) && "automotive".equals(activity)) {
@@ -379,14 +433,55 @@ public class JsonStorageHelper {
 
                     // 2. Add location point if in automotive mode 
                     if ("location".equals(type) && isTrackingAutomotive) {
-                        JSONObject measure = new JSONObject();
-                        measure.put("lat", current.optDouble("lat"));
-                        measure.put("lng", current.optDouble("lng"));
-                        measure.put("speed", current.optDouble("speed"));
-                        measure.put("timestamp", timestamp);
-                        measure.put("type", "location");
-                        
-                        currentMeasures.put(measure);
+
+                        double lat = current.optDouble("lat");
+                        double lng = current.optDouble("lng");
+                        timestamp = current.optLong("timestamp", 0);
+
+                        if (!Double.isNaN(lat) && !Double.isNaN(lng) && timestamp > 0)
+                        {
+
+                            JSONObject measure = new JSONObject();
+                            measure.put("lat", current.optDouble("lat"));
+                            measure.put("lng", current.optDouble("lng"));
+                            measure.put("speed", speed);
+                            measure.put("timestamp", timestamp);
+                            measure.put("type", "location");
+
+                            // check if meteo exist and add
+                            if (current.has("weather") && !current.isNull("weather")) {
+                                JSONObject weatherData = current.optJSONObject("weather");
+                                if (weatherData != null) {
+                                    JSONObject weatherPoint = new JSONObject();
+                                    weatherPoint.put("type", weatherData.optString("type"));
+                                    weatherPoint.put("temp", weatherData.optDouble("temp"));
+                                    
+                                    measure.put("weather", weatherPoint);
+                                }
+                            }
+
+                            // check if unlock exist and add
+                            if (current.has("phoneUnlock")) {
+                                measure.put("phoneUnlock", current.optBoolean("phoneUnlock"));
+                            }
+
+                            if (current.has("appUsed") && !current.isNull("appUsed")) {
+                                JSONObject appUsedData = current.optJSONObject("appUsed");
+                                if (appUsedData != null) {
+                                    JSONObject appUsedPoint = new JSONObject();
+                                    appUsedPoint.put("type", appUsedData.optString("name"));
+                                    appUsedPoint.put("accuracy", 1);
+                                    
+                                    measure.put("appUsed", appUsedPoint);
+                                }
+                            }
+
+                            if (current.has("distractionDetect")) {
+                                measure.put("distractionDetect", current.optBoolean("distractionDetect"));
+                            }
+                            
+                            currentMeasures.put(measure);
+                        }
                     }
                 }
 
@@ -581,6 +676,54 @@ public class JsonStorageHelper {
                     point.put("lng", entry.optDouble("lng"));
                     point.put("speed", entry.optDouble("speed"));
                     point.put("timestamp", entry.optLong("timestamp"));
+
+                    // check if meteo exist and add
+                    if (entry.has("weather") && !entry.isNull("weather")) {
+                        JSONObject weatherData = entry.optJSONObject("weather");
+                        if (weatherData != null) {
+                            JSONObject weatherPoint = new JSONObject();
+                            weatherPoint.put("type", weatherData.optString("type"));
+                            weatherPoint.put("temp", weatherData.optDouble("temp"));
+                            
+                            point.put("weather", weatherPoint);
+                        }
+                    }
+
+                    // check if unlock exist and add
+                    boolean isPhoneUnlocked = false;
+                    if (entry.has("phoneUnlock")) {
+                        isPhoneUnlocked = entry.optBoolean("phoneUnlock");
+                        point.put("phoneUnlock", isPhoneUnlocked);
+                    }
+
+                    // get app info if exists
+                    JSONObject appUsed = null;
+
+                    if (entry.has("appUsed") && !entry.isNull("appUsed")) {
+                        appUsed = entry.optJSONObject("appUsed");
+                    }
+
+                    // send app only if phone unlocked
+                    if (isPhoneUnlocked) {
+                        if (appUsed != null) {
+                            JSONObject appUsedPoint = new JSONObject();
+                            appUsedPoint.put("type", appUsed.optString("name"));
+                            appUsedPoint.put("accuracy", appUsed.optDouble("accuracy"));
+                            
+                            point.put("appUsed", appUsedPoint);
+                        }
+
+                        boolean isDistraction = false;
+                            if (entry.has("distractionDetect")) {
+                                isDistraction = entry.optBoolean("distractionDetect");
+                                point.put("distractionDetect", isDistraction);
+                            }
+                    } else {
+                        Log.d(TAG, "📱 phone locked : injection of usedApp ignored.");
+                    }
+
+                    Log.d(TAG, "📍 Point ajouté à measuresArray : " + point.toString());
+
                     measuresArray.put(point);
                 }
             }
@@ -707,6 +850,10 @@ public class JsonStorageHelper {
             Log.d("JsonStorageHelper", "🛑 Météo : Alarms ended");
         }
     }
+
+    // trip definitively ended, do not record any location
+    setDrivingState(context, false);
+
 }
 
     //
@@ -745,6 +892,43 @@ public class JsonStorageHelper {
     // 
     public static JSObject getLastWeather() {
         return lastWeather;
+    }
+
+
+    //
+    // set lock status
+    // 
+    public static void setLockStatus(boolean status) {
+        lastLockStatus = status;
+    }
+
+    //
+    // get lock status
+    // 
+    public static boolean getLockStatus() {
+        return lastLockStatus;
+    }
+
+    //
+    // set Last forground App
+    //
+    public static void setLastForegroundApp(JSObject appData) {
+        lastForegroundApp = appData;
+    }
+
+
+    //
+    // get Last foreground App
+    //
+    public static JSObject getLastForegroundApp() {
+        return lastForegroundApp;
+    }
+
+    /**
+     * get distraction status
+     */
+    public static boolean getDistractionStatus() {
+        return DistractionEventEmitter.getCurrentlyDistracted(); 
     }
     
 }

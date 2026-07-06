@@ -20,6 +20,8 @@ import android.provider.Settings;
 
 import androidx.core.app.ActivityCompat;
 
+import android.app.AppOpsManager;
+
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -155,15 +157,18 @@ public class ActivityRecognitionPlugin extends Plugin {
         String activityState = getSafePermissionState("activity");
         String locationState = getSafePermissionState("location");
         String bgLocationState = getSafePermissionState("backgroundLocation");
+        String foregroundAppState = checkUsageStatsPermission();
 
         ret.put("activity", activityState);
         ret.put("location", locationState);
         ret.put("backgroundLocation", bgLocationState);
+        ret.put("foregroundAppState", foregroundAppState);
 
         // Un flag 'granted' global pour simplifier le JS
         boolean allOk = "granted".equals(activityState) && 
                         "granted".equals(locationState) && 
-                        "granted".equals(bgLocationState);
+                        "granted".equals(bgLocationState) &&
+                        "granted".equals(foregroundAppState);
                         
         ret.put("granted", allOk);
 
@@ -181,8 +186,11 @@ public class ActivityRecognitionPlugin extends Plugin {
 
     @PluginMethod
     public void requestPermissions(PluginCall call) {
+        // app usage permission (only available on android)
+        requestUsageStatsPermission();
+
         // if user request background on Android 11+
-        // logic can be added here but in capacitor alreday managed 
+        // logic can be added here but in capacitor already managed 
         super.requestPermissions(call);
     }
 
@@ -519,6 +527,41 @@ public class ActivityRecognitionPlugin extends Plugin {
                 JSObject ret = new JSObject();
                 ret.put("inProgress", syncing);
                 call.resolve(ret);
+            }
+
+
+            public void requestUsageStatsPermission() {
+                // CORRECTION : Utilisation de getContext()
+                AppOpsManager appOps = (AppOpsManager) getContext().getSystemService(Context.APP_OPS_SERVICE);
+                int mode = appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, 
+                        android.os.Process.myUid(), getContext().getPackageName());
+                
+                boolean granted = (mode == AppOpsManager.MODE_ALLOWED);
+                JSObject ret = new JSObject();
+                
+                // Si la permission n'est pas accordée, on ouvre les paramètres
+                if (!granted) {
+                    Intent intent = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
+                    intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    getContext().startActivity(intent);
+                }
+            }
+
+            // check if permission allowed for getting app on screen
+            // CORRECTION : Changement de la signature pour enlever le paramètre inutile
+            public String checkUsageStatsPermission() {
+                // CORRECTION : Utilisation de getContext()
+                AppOpsManager appOps = (AppOpsManager) getContext().getSystemService(Context.APP_OPS_SERVICE);
+                int mode = appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, 
+                        android.os.Process.myUid(), getContext().getPackageName());
+                
+                boolean granted = (mode == AppOpsManager.MODE_ALLOWED);
+                
+                if (!granted) {
+                    return "denied"; 
+                }
+                
+                return "granted"; // "granted" if all OK
             }
 
 

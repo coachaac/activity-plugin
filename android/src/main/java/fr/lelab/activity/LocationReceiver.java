@@ -22,8 +22,13 @@ public class LocationReceiver extends BroadcastReceiver {
             ? context.createDeviceProtectedStorageContext() 
             : context;
 
-        // Récupération de l'objet météo en cache (déjà au format JSObject)
+        // retrieve last weather object
         JSObject currentWeather = JsonStorageHelper.getLastWeather();
+
+        // retrieve last forground App
+        JSObject appForegroundData = JsonStorageHelper.getLastForegroundApp();
+
+        boolean isDistractionActive = DistractionEventEmitter.getCurrentlyDistracted();
 
         for (Location location : locationResult.getLocations()) {
 
@@ -34,13 +39,16 @@ public class LocationReceiver extends BroadcastReceiver {
 
             
             // call saveLocation once. 
-            // if currentWeather === null, saveLocation manage properly
+            // if currentWeather === null, saveLocation or appForegroundData manage properly
             JsonStorageHelper.saveLocation(
                 safeContext, 
                 location.getLatitude(), 
                 location.getLongitude(), 
                 location.getSpeed(),
-                currentWeather
+                location.getTime(),
+                currentWeather,
+                appForegroundData,
+                isDistractionActive
             );
 
             // 2. Notify plugin (UI Interface)

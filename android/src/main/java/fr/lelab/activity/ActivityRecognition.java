@@ -3,9 +3,18 @@ package fr.lelab.activity;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.BroadcastReceiver;
 import android.content.SharedPreferences;
 import android.os.Build;
 import android.util.Log;
+
+import android.app.usage.UsageEvents;
+import android.app.usage.UsageStatsManager;
+
+import com.getcapacitor.JSObject;
+
+import androidx.annotation.NonNull;
 
 import com.google.android.gms.location.ActivityRecognitionClient;
 import com.google.android.gms.location.ActivityTransition;
@@ -20,8 +29,14 @@ public class ActivityRecognition {
     private Context context;
     private ActivityRecognitionClient activityClient;
     private PendingIntent activityPendingIntent;
+
+    private BroadcastReceiver screenReceiver;
+    private static DistractionEventEmitter distractionEmitter;
+
     private static final String TAG = "ActivityRecognition";
     private static final String PREFS_NAME = "CapacitorStorage";
+
+    private static boolean touchDetect = false;
 
     public ActivityRecognition(Context context) {
         this.context = context;
@@ -80,7 +95,51 @@ public class ActivityRecognition {
         }
 
         setupActivityTransitions();
+
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_SCREEN_ON);
+        filter.addAction(Intent.ACTION_SCREEN_OFF);
+        filter.addAction(Intent.ACTION_USER_PRESENT); // Écran déverrouillé
+
+        screenReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (Intent.ACTION_SCREEN_ON.equals(intent.getAction())) {
+                    Log.d(TAG, "📱 Screen ON (Background)");
+
+                } else if (Intent.ACTION_USER_PRESENT.equals(intent.getAction())) {
+                    Log.d(TAG, "🔓 phone unlocked");
+                    JsonStorageHelper.setLockStatus(false);
+
+                    // check current app
+                    // 1. On vérifie d'abord si l'utilisateur a donné l'autorisation
+                    android.app.AppOpsManager appOps = (android.app.AppOpsManager) context.getSystemService(Context.APP_OPS_SERVICE);
+                    int mode = appOps.checkOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, 
+                            android.os.Process.myUid(), context.getPackageName());
+                    
+                    boolean isGranted = (mode == android.app.AppOpsManager.MODE_ALLOWED);
+
+                    // 2. Si oui, on peut chercher l'application au premier plan
+                    if (isGranted) {
+                        Log.d(TAG, "✅ Autorisation UsageStats granted. Try to get active app...");
+                        String appActive = ForegroundAppDetector.getForegroundApp(context);
+                        
+                        // Optionnel : vous pouvez stocker l'application active ou lever un drapeau ici
+                    } else {
+                        Log.w(TAG, "⚠️ Unable to get active application : Autorisation missing (denied)");
+                    }
+
+                } else if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
+                    Log.d(TAG, "🔒 Phone locked");
+                    JsonStorageHelper.setLockStatus(true);
+                }
+
+            }
+        };
+
+        context.registerReceiver(screenReceiver, filter);
     }
+
 
     private void setupActivityTransitions() {
         List<ActivityTransition> transitions = new ArrayList<>();
@@ -121,6 +180,15 @@ public class ActivityRecognition {
         saveState("tracking_active", false);
         saveState("driving_state", false); 
 
+        if (screenReceiver != null) {
+            try {
+                context.unregisterReceiver(screenReceiver);
+            } catch (IllegalArgumentException e) {
+                Log.e(TAG, "Receiver already registered or not found", e);
+            }
+            screenReceiver = null;
+        }
+
         // 1. Stop transition sensor
         if (activityClient != null && activityPendingIntent != null) {
             activityClient.removeActivityTransitionUpdates(activityPendingIntent);
@@ -130,6 +198,7 @@ public class ActivityRecognition {
         // 2. kill foreground service (and so notification)
         Intent intent = new Intent(context, TrackingService.class);
         context.stopService(intent);
+
     }
 
     private PendingIntent createPendingIntent(Intent intent) {
@@ -140,4 +209,32 @@ public class ActivityRecognition {
         }
         return PendingIntent.getBroadcast(context, requestCode, intent, flags);
     }
+
+
+    // Start distraction
+    public static void startDistractionFromReceiver(Context context) {
+        if (distractionEmitter == null) {
+            Log.i("ActivityRecognition", "🚗 Mode véhicule détecté : Démarrage des capteurs de distraction.");
+            
+            // On crée l'émetteur (vous pouvez passer null pour le listener si vous lisez uniquement la valeur via le JsonStorageHelper)
+            distractionEmitter = new DistractionEventEmitter(context, new DistractionEventEmitter.DistractionListener() {
+                @Override
+                public void onDistractionEvent(String eventType, long timestamp) {
+                    Log.d("ActivityRecognition", "📥 Événement distraction : " + eventType);
+                }
+            });
+            distractionEmitter.startMonitoring();
+        }
+    }
+
+    // Stop distraction
+    public static void stopDistractionFromReceiver() {
+        if (distractionEmitter != null) {
+            Log.i("ActivityRecognition", "🚶 Sortie de véhicule détectée : Arrêt des capteurs de distraction.");
+            distractionEmitter.stopMonitoring();
+            distractionEmitter = null;
+        }
+    }
+
+
 }

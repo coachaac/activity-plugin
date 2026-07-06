@@ -91,9 +91,10 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
             context.startService(serviceIntent);
         }
 
-        Log.d(TAG, "🔋 Stop Weather Updates");
+        Log.d(TAG, "🔋 Stop Weather Updates and distraction monitoring");
         JsonStorageHelper.cancelWeatherUpdates(context);
         
+        ActivityRecognition.stopDistractionFromReceiver();
     }
 
     private void handleTransition(Context context, int activityType, int transitionType) {
@@ -123,9 +124,12 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
             updateDrivingState(safeContext, true); // Persistance Direct Boot
             cancelGraceAlarm(context);
 
-            Log.d(TAG, "🚗 Start GPS & Weather");
+            Log.d(TAG, "🚗 Start GPS & Weather / get weather / start distraction monitoring");
             startTrackingService(context);
+            
             JsonStorageHelper.scheduleNextWeatherUpdate(context);
+
+            ActivityRecognition.startDistractionFromReceiver(context);
         } 
         else if (
             (DetectedActivity.IN_VEHICLE == activityType && transitionType == ActivityTransition.ACTIVITY_TRANSITION_EXIT) 

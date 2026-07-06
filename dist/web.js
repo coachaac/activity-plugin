@@ -4,14 +4,16 @@ export class ActivityRecognitionWeb extends WebPlugin {
         return {
             activity: 'granted',
             location: 'granted',
-            backgroundLocation: 'granted'
+            backgroundLocation: 'granted',
+            foregroundAppState: 'granted'
         };
     }
     async requestPermissions() {
         return {
             activity: 'granted',
             location: 'granted',
-            backgroundLocation: 'granted'
+            backgroundLocation: 'granted',
+            foregroundAppState: 'granted'
         };
     }
     async checkBatteryOptimization() {
@@ -33,7 +35,7 @@ export class ActivityRecognitionWeb extends WebPlugin {
         return { status: "not managed on web" };
     }
     async testSettings() {
-        console.warn('testSettings n’est pas disponible sur le Web. Simulation d’un succès.');
+        console.warn('testSettings not available on Web. Success simulated.');
         return {
             status: 'ok',
             statusCode: 200,
@@ -42,7 +44,7 @@ export class ActivityRecognitionWeb extends WebPlugin {
         };
     }
     async isSyncing() {
-        // Sur le web, on considère qu'aucune synchro n'est en cours
+        // web version considering no syncing in progress
         return { inProgress: false };
     }
     async getSavedLocations() {

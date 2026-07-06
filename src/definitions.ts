@@ -4,6 +4,7 @@ export interface PermissionStatus {
   activity: PermissionState;
   location: PermissionState; 
   backgroundLocation: PermissionState;
+  foregroundAppState: PermissionState;
 }
 
 export interface ActivityEvent {

@@ -7,7 +7,8 @@ export class ActivityRecognitionWeb extends WebPlugin implements ActivityRecogni
     return { 
       activity: 'granted',
       location: 'granted',
-      backgroundLocation: 'granted'
+      backgroundLocation: 'granted',
+      foregroundAppState: 'granted'
     };
   }
 
@@ -15,7 +16,8 @@ export class ActivityRecognitionWeb extends WebPlugin implements ActivityRecogni
     return { 
       activity: 'granted',
       location: 'granted',
-      backgroundLocation: 'granted'
+      backgroundLocation: 'granted',
+      foregroundAppState: 'granted'
     };
   }
 

@@ -49,6 +49,45 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     private var lastWeatherLocation: CLLocation? = nil
     private let weatherDistanceThreshold: CLLocationDistance = 2000 // 2 km
 
+    private var isScreenLocked: Bool = false
+    private let motionManager = CMMotionManager()
+    private var isCurrentlyDistracted = false
+    private var isMonitoringActive = false
+
+    // --- Hystérésis distraction Variables ---
+    private var distractionTimeoutTimer: Timer? = nil
+    private let distractionDelay: TimeInterval = 4.0 // true for 4 s 
+    private var distractionHasBeenSavedOnGPS = false
+
+    private var lastAccelerationZ: Double = 0.0
+
+/*
+    //
+    //
+    //  GPS SIMULATION START
+    //
+    //
+
+    private let simulatedLocationManager = CLLocationManager()
+    private var lastSimulatedLocation: CLLocation?
+
+    private func startSimulatedActivityDetection() {
+        // use CLLocationManager to intercept GPX file data
+        simulatedLocationManager.delegate = self
+        simulatedLocationManager.desiredAccuracy = kCLLocationAccuracyBest
+        simulatedLocationManager.startUpdatingLocation()
+        print("⚠️ Mode Simulation activé : Détection d'activité via GPS (GPX)")
+    }
+
+    //
+    //
+    //  GPS SIMULATION END
+    //
+    //
+*/
+
+
+
     //
     // restore location tracking state after restart or swipe app
     //
@@ -56,6 +95,9 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         locationManager.delegate = self
         locationManager.pausesLocationUpdatesAutomatically = false
         locationManager.allowsBackgroundLocationUpdates = true
+
+        self.weatherApiKey = UserDefaults.standard.string(forKey: "weather_api_key")
+        self.weatherBaseUrl = UserDefaults.standard.string(forKey: "weather_base_url") ?? "https://api.openweathermap.org/data/2.5/weather"
         
         // On vérifie si l'utilisateur avait activé le tracking avant le crash/swipe
         let wasTracking = UserDefaults.standard.bool(forKey: kIsTrackingActive)
@@ -93,12 +135,36 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     // Centraliseed Logic for Activity detection
     //
     private func startActivityDetection() {
+
+
+/*
+    //
+    //
+    //  GPS SIMULATION START
+    //
+    //
+        #if DEBUG
+        // Pour tes tests avec le fichier GPX d'Union Square
+        startSimulatedActivityDetection()
+        return // On stoppe ici pour éviter de lancer le vrai CMMotionActivityManager
+        #endif
+
+    //
+    //
+    //  GPS SIMULATION END
+    //
+    //
+*/
+
+
         guard CMMotionActivityManager.isActivityAvailable() else { return }
         
-        activityManager.startActivityUpdates(to: .main) { [weak self] (activity) in
+        let backgroundQueue = OperationQueue()
+        backgroundQueue.name = "com.plugin.activity.backgroundQueue"
+        backgroundQueue.maxConcurrentOperationCount = 1
+
+        activityManager.startActivityUpdates(to: backgroundQueue) { [weak self] (activity) in
             guard let self = self, let activity = activity else { return }
-            
-            // All managed by handleActivityUpdate .
             self.handleActivityUpdate(activity)
         }
     }
@@ -167,11 +233,12 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
                 self.isDriving = true
                 UserDefaults.standard.set(true, forKey: kIsDrivingState)
 
+                self.checkAndStartDistractionIfNeeded()
+
                 if let currentLoc = locationManager.location {
                     print("🌤️ Automotive detect: triggering initial weather fetch")
                     // Init for didUpdateLocations logic
                     self.lastWeatherLocation = currentLoc
-                    self.lastWeatherFetchDate = now
 
                     self.fetchWeatherData(lat: currentLoc.coordinate.latitude, lon: currentLoc.coordinate.longitude)
                 }
@@ -293,19 +360,26 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         self.serverUrl = url
         self.groupId = groupId
 
-        self.weatherApiKey = call.getString("weatherKey")
+        if let apiKey = call.getString("weatherAPIkey") {
+            self.weatherApiKey = apiKey
+            UserDefaults.standard.set(apiKey, forKey: "weather_api_key")
+            print("🌤️ [ActivityPlugin] weatherApiKey sauvegardée avec succès.")
+        } else {
+            print("⚠️ [ActivityPlugin] weatherKey manquante dans l'appel JS.")
+        }
+        
         if let customWeatherUrl = call.getString("weatherUrl") {
             self.weatherBaseUrl = customWeatherUrl
+            UserDefaults.standard.set(customWeatherUrl, forKey: "weather_base_url")
+        } else {
+            self.weatherBaseUrl = "https://api.openweathermap.org/data/2.5/weather"
+            UserDefaults.standard.set(self.weatherBaseUrl, forKey: "weather_base_url")
         }
-
-        // Persistance pour le redémarrage (Optionnel)
-        UserDefaults.standard.set(self.weatherApiKey, forKey: "weather_api_key")
-        UserDefaults.standard.set(self.weatherBaseUrl, forKey: "weather_base_url")
 
         if !CMMotionActivityManager.isActivityAvailable() {
             print("❌ Motion Activity not available on this device")
         }
-        
+
         // Relancer proprement les updates
         activityManager.stopActivityUpdates() // Clean start
         startActivityDetection()
@@ -315,6 +389,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
         // wake up app when visited place change
         self.locationManager.startMonitoringVisits()
+
+        // initialize change lock status / Touch screen
+        setupScreenLockTouchObservers()
+
         call.resolve()
     }
 
@@ -338,7 +416,23 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         locationManager.stopMonitoringSignificantLocationChanges()
         
         locationManager.allowsBackgroundLocationUpdates = false
-        
+
+        NotificationCenter.default.removeObserver(self, name: UIApplication.protectedDataWillBecomeUnavailableNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil)
+
+/*
+        //
+        //  GPS SIMULATION START
+        //
+        #if DEBUG
+        simulatedLocationManager.stopUpdatingLocation()
+        simulatedLocationManager.delegate = nil
+        lastSimulatedLocation = nil
+        #endif
+        //
+        //  GPS SIMULATION END
+        //
+*/        
         print("🛑 All Trackings stopped")
         call.resolve()
     }
@@ -485,7 +579,69 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
     // - locationManager strategy management
     // 
     public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let location = locations.last else { return }
+
+        // extract real lst point received by delegate id exist
+        guard var location = locations.last else { return }
+
+/*
+        //
+        // GPS SIMULATION START (DEBUG ONLY)
+        //
+        #if DEBUG
+        if manager == simulatedLocationManager {
+            var isDrivingSim = false
+            var calculatedSpeedMS: CLLocationSpeed = 0.0
+            
+            // Calcul de la vitesse à partir du fichier GPX
+            if let oldLocation = lastSimulatedLocation {
+                let distance = location.distance(from: oldLocation)
+                let timeInterval = location.timestamp.timeIntervalSince(oldLocation.timestamp)
+                
+                if timeInterval > 0 {
+                    let speedKmH = (distance / timeInterval) * 3.6
+                    if speedKmH < 330.0 {
+                        print("🚗 [Simu GPX] Vitesse calculée : \(Int(speedKmH)) km/h")
+                        isDrivingSim = speedKmH > 20.0
+                        calculatedSpeedMS = distance / timeInterval // Vitesse convertie en m/s
+                    } else {
+                        print("🚗 [Simu GPX] Premier point ignoré (stabilisation en cours...)")
+                        isDrivingSim = false
+                    }
+                }
+            }
+            
+            self.lastSimulatedLocation = location
+            
+            // On ÉCRASE la variable locale 'location' par un nouvel objet CLLocation 
+            // qui embarque artificiellement notre vitesse calculée (en m/s)
+            location = CLLocation(
+                coordinate: location.coordinate,
+                altitude: location.altitude,
+                horizontalAccuracy: location.horizontalAccuracy,
+                verticalAccuracy: location.verticalAccuracy,
+                course: location.course,
+                speed: calculatedSpeedMS, // Injection de la vitesse calculée !
+                timestamp: location.timestamp
+            )
+            
+            // Instanciation de notre classe truquée pour le CoreMotion simulé
+            let simulatedActivity = SimulatedMotionActivity(
+                driving: isDrivingSim,
+                date: location.timestamp
+            )
+            
+            // On envoie le faux CoreMotion à ta logique centrale
+            self.handleActivityUpdate(simulatedActivity)
+            
+            // Surtout PAS de return ici ! On laisse le code continuer plus bas.
+            // La variable 'location' modifiée va maintenant descendre dans toute la suite du traitement.
+        }
+        #endif
+        //
+        // GPS SIMULATION END
+        //
+*/
+
         let now = Date()
 
         let age = abs(location.timestamp.timeIntervalSinceNow)
@@ -499,10 +655,11 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
                 print("🚀 High speed detected (\(location.speed)m/s). Forcing Driving mode.")
                 self.isDriving = true
                 UserDefaults.standard.set(true, forKey: kIsDrivingState)
+
+                self.checkAndStartDistractionIfNeeded()
                 
                 // Initialisation immédiate des compteurs météo pour éviter un double appel
                 self.lastWeatherLocation = location
-                self.lastWeatherFetchDate = now
                 fetchWeatherData(lat: location.coordinate.latitude, lon: location.coordinate.longitude)
                 
                 // Log de l'événement ENTER pour le trajet
@@ -530,7 +687,6 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             // request if : First time Or Distance or elapse time 
             if lastWeatherFetchDate == nil || distanceSinceLastFetch >= weatherDistanceThreshold || isExpired {
                  self.lastWeatherLocation = location
-                 self.lastWeatherFetchDate = now 
                  fetchWeatherData(lat: location.coordinate.latitude, lon: location.coordinate.longitude)
             }
         }
@@ -562,10 +718,38 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
         // add weather from cache (format brief)
         if let weather = ActivityRecognitionPlugin.lastWeatherCache {
-            newPoint["weather_temp"] = weather["temp"]
-            newPoint["weather_type"] = weather["type"]
+
+            let tempString = String(describing: weather["temp"] ?? "")
+            let typeString = String(describing: weather["type"] ?? "")
+
+            newPoint["weather"] = [
+                "type": typeString,
+                "temp": tempString
+            ]
         } else {
             print("⏳ Weather not yet available for this point")
+        }
+
+        // add touchscreen if detected
+        let isScreenUnlocked = !self.getLockStatus() // getLockStatus() false screen on
+
+        if isScreenUnlocked {
+            newPoint["phoneUnlock"] = true
+
+            // add distraction if detected
+            let isDistractionDetected = self.getCurrentDistraction()
+
+            if isDistractionDetected {
+                newPoint["distractionDetect"] = true
+                // On valide qu'au moins un point GPS a enregistré l'état de distraction active
+                self.distractionHasBeenSavedOnGPS = true
+            } else {
+                newPoint["distractionDetect"] = false
+            }
+
+        } else {
+            newPoint["phoneUnlock"] = false
+            newPoint["distractionDetect"] = false
         }
 
         self.logToFile("Position reçue")
@@ -589,6 +773,8 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         activityLock.unlock()
 
         print("🛑 forceStopDriving : Processing end of trip...")
+
+        self.stopDistractionDetection()
 
         // 1. Set automotive EXIT
 
@@ -982,12 +1168,20 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
                     "lng": entry["lng"] ?? 0.0,
                     "speed": entry["speed"] ?? 0.0,
                     "timestamp": timestamp,
-                    "type": "location"
+                    "type": "location",
+                    "distractionDetect": entry["distractionDetect"] ?? false,
                 ]
-                
-                if let temp = entry["weather_temp"] { point["weather_temp"] = temp }
-                if let wType = entry["weather_type"] { point["weather_type"] = wType }
-                
+
+                if let weatherData = entry["weather"] as? [String: Any] {
+                    let tempString = String(describing: weatherData["temp"] ?? "0.0")
+                    let typeString = String(describing: weatherData["type"] ?? "unknown")
+                    
+                    point["weather"] = [
+                        "type": typeString,
+                        "temp": tempString
+                    ]
+                }       
+
                 currentMeasures.append(point)
             }
         }
@@ -1155,7 +1349,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         print("🛣️ Trajet réel: \(Int(totalDistance))m, Durée: \(Int(durationSeconds))s")
 
         //  > 500m  and > 60s
-        let isSignificant = (totalDistance > 500 && durationSeconds > 60)
+        let isSignificant = (totalDistance > 1000 && durationSeconds > 60)
         if !isSignificant {
             print("🗑️ trip ignored as non significant.")
         }
@@ -1510,4 +1704,208 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
     }
 
+    //
+    // 🍏 Check change in screen lock unlock & Motion Detection
+    //
+    func setupScreenLockTouchObservers() {
+        // Détection du verrouillage (L'application passe en mode "données protégées non disponibles")
+        NotificationCenter.default.addObserver(self, 
+            selector: #selector(deviceDidLock), 
+            name: UIApplication.protectedDataWillBecomeUnavailableNotification, 
+            object: nil)
+            
+        // Détection du déverrouillage (Les données redeviennent disponibles)
+        NotificationCenter.default.addObserver(self, 
+            selector: #selector(deviceDidUnlock), 
+            name: UIApplication.protectedDataDidBecomeAvailableNotification, 
+            object: nil)
+    }
+
+    @objc private func deviceDidLock() {
+        print("🔒 Événement système : Téléphone verrouillé")
+        self.isScreenLocked = true
+        
+        // Si l'écran se verrouille, l'utilisateur ne manipule plus l'appareil.
+        // On force un STOP_DISTRACTION immédiat pour le backend si une distraction était en cours.
+        if self.isCurrentlyDistracted {
+            self.isCurrentlyDistracted = false
+            let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+            print("📱 STOP_DISTRACTION (clôture par verrouillage écran) à \(timestamp)")
+
+            self.stopDistractionDetection();
+            
+            // TODO: Enregistrer l'événement dans votre stockage de trajet existant :
+            // self.saveDistractionEventToTrip(type: "STOP_DISTRACTION", timestamp: timestamp)
+        }
+    }
+
+    @objc private func deviceDidUnlock() {
+        print("🔓 Événement système : Téléphone déverrouillé")
+        self.isScreenLocked = false
+
+        // 🚀 Lancement de la détection de distraction par les capteurs (Fonctionne en tâche de fond)
+        DispatchQueue.main.async {
+            self.startDistractionDetection() //
+            
+            print("🍏 [ActivityPlugin] Surveillance de la distraction (capteurs) activée.")
+        }
+    }
+
+    private func getLockStatus() -> Bool {
+        return self.isScreenLocked
+    }
+
+
+    //
+    // 🎯 Détection de distraction (Capteurs de mouvement)
+    //
+    
+    func startDistractionDetection() {
+        guard motionManager.isDeviceMotionAvailable else { return }
+        guard !isMonitoringActive else { return }
+        
+        isMonitoringActive = true
+        isCurrentlyDistracted = false
+        self.lastAccelerationZ = 0.0
+        
+        motionManager.deviceMotionUpdateInterval = 0.05 
+        
+        motionManager.startDeviceMotionUpdates(to: OperationQueue.main) { [weak self] (data, error) in
+            guard let self = self, self.isMonitoringActive, let motionData = data else { return }
+            
+            let rotation = motionData.rotationRate
+            let acceleration = motionData.userAcceleration
+            
+            let rotationMagnitude = sqrt(pow(rotation.x, 2) + pow(rotation.y, 2) + pow(rotation.z, 2))
+            let accelerationMagnitude = sqrt(pow(acceleration.x, 2) + pow(acceleration.y, 2) + pow(acceleration.z, 2))
+            
+            let deltaAccelZ = abs(acceleration.z - self.lastAccelerationZ)
+            self.lastAccelerationZ = acceleration.z
+            
+            let rotationThreshold: Double = 0.3
+            let accelerationThreshold: Double = 0.2
+            let clickImpactThreshold: Double = 0.15
+            
+            let isManipulated = rotationMagnitude > rotationThreshold && accelerationMagnitude > accelerationThreshold
+            let isClicked = deltaAccelZ > clickImpactThreshold
+            
+            if isManipulated || isClicked {
+                // L'utilisateur bouge le téléphone -> On annule le timer d'extinction s'il tournait
+                self.distractionTimeoutTimer?.invalidate()
+                self.distractionTimeoutTimer = nil
+                
+                if !self.isCurrentlyDistracted {
+                    self.isCurrentlyDistracted = true
+                    self.distractionHasBeenSavedOnGPS = false // En attente de sauvegarde sur le prochain point GPS
+                    let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+                    print("🚨 START_DISTRACTION à \(timestamp)")
+                }
+            } else {
+                // L'utilisateur ne manipule plus le téléphone
+                    if self.isCurrentlyDistracted && self.distractionTimeoutTimer == nil {
+                        
+                        self.distractionTimeoutTimer = Timer.scheduledTimer(withTimeInterval: self.distractionDelay, repeats: true) { [weak self] timer in
+                            guard let self = self else { return }
+                            
+                            // Condition de clôture de l'hystérésis
+                            if self.distractionHasBeenSavedOnGPS {
+                                self.isCurrentlyDistracted = false
+                                self.distractionHasBeenSavedOnGPS = false
+                                let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+                                print("📱 STOP_DISTRACTION (Hystérésis validé par écriture GPS) à \(timestamp)")
+                                
+                                timer.invalidate()
+                                self.distractionTimeoutTimer = nil
+                            } else {
+                                print("⏳ Hystérésis : Attente de synchronisation du point GPS avant coupure...")
+                                self.isDriving = true // Maintien du statut de suivi
+                            }
+                        }
+                    }
+                }
+
+            }
+        }
+
+     private func getCurrentDistraction() -> Bool {
+        return self.isCurrentlyDistracted
+    }
+
+    func stopDistractionDetection() {
+        isMonitoringActive = false
+        
+        distractionTimeoutTimer?.invalidate()
+        distractionTimeoutTimer = nil
+        
+        if motionManager.isDeviceMotionActive {
+            motionManager.stopDeviceMotionUpdates()
+            print("🛑 [ActivityPlugin] Détection de distraction arrêtée matériellement.")
+        }
+        
+        if isCurrentlyDistracted {
+            isCurrentlyDistracted = false
+            let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+            print("📱 STOP_DISTRACTION (clôture forcée à l'arrêt global) à \(timestamp)")
+        }
+    }
+
+
+    private func checkAndStartDistractionIfNeeded() {
+        let isScreenUnlocked = !self.getLockStatus() // true = écran allumé/déverrouillé
+        
+        if self.isDriving && isScreenUnlocked {
+            print("📱 [Distraction] Conduite active + Écran déverrouillé. Lancement des capteurs.")
+            self.startDistractionDetection()
+        }
+    }
+
 }
+
+/*
+//
+//  GPS SIMULATION START
+//
+
+    #if DEBUG
+    /// Une sous-classe de CMMotionActivity pour bypasser la protection d'Apple en mode simulation.
+    class SimulatedMotionActivity: CMMotionActivity {
+        private let _isDriving: Bool
+        private let _date: Date
+
+        init(driving: Bool, date: Date) {
+            self._isDriving = driving
+            self._date = date
+            super.init()
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        // Surcharge des propriétés lues par ton application
+        override var automotive: Bool {
+            return _isDriving
+        }
+
+        override var stationary: Bool {
+            return !_isDriving
+        }
+
+        override var walking: Bool {
+            return false
+        }
+
+        override var confidence: CMMotionActivityConfidence {
+            return .high
+        }
+
+        override var startDate: Date {
+            return _date
+        }
+    }
+    #endif
+
+//
+//  GPS SIMULATION END
+//
+*/
