@@ -34,6 +34,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Scanner;
 
+import java.security.SecureRandom;
+import java.util.concurrent.atomic.AtomicInteger;
+
 public class JsonStorageHelper {
 
     private static boolean saveOnlyAutomotive = true;
@@ -734,6 +737,10 @@ public class JsonStorageHelper {
             }
 
             payload.put("measures", measuresArray);
+
+            String courseId = generateObjectId();
+            payload.put("_id", courseId);
+
             String jsonOutput = payload.toString();
 
             // Log de débogage avec limite de taille
@@ -929,6 +936,28 @@ public class JsonStorageHelper {
      */
     public static boolean getDistractionStatus() {
         return DistractionEventEmitter.getCurrentlyDistracted(); 
+    }
+
+    private static final AtomicInteger counter = new AtomicInteger(new SecureRandom().nextInt());
+    private static final SecureRandom random = new SecureRandom();
+
+    // 1. Add the method right inside your helper class
+    public static String generateObjectId() {
+        int timestamp = (int) (System.currentTimeMillis() / 1000);
+        
+        byte[] randomBytes = new byte[5];
+        random.nextBytes(randomBytes);
+        
+        int count = counter.getAndIncrement() & 0xFFFFFF;
+
+        StringBuilder sb = new StringBuilder(24);
+        sb.append(String.format("%08x", timestamp));
+        for (byte b : randomBytes) {
+            sb.append(String.format("%02x", b));
+        }
+        sb.append(String.format("%06x", count));
+
+        return sb.toString();
     }
     
 }

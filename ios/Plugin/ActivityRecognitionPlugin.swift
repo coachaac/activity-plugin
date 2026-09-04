@@ -1400,7 +1400,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
 
     //
-    // upload on trip to server to server
+    // upload trip to server
     //
     func uploadTripToServer(points: [[String: Any]], completion: @escaping (Bool) -> Void) {
     
@@ -1413,6 +1413,8 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             completion(false)
             return
         }
+
+        let courseId = MongoIdGenerator.generateObjectId()
 
         // 2. Préparation et NETTOYAGE du payload
         let measures = points.compactMap { (dict) -> [String: Any]? in
@@ -1453,7 +1455,10 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             return
         }
 
-        let payload: [String: Any] = ["measures": measures]
+        let payload: [String: Any] = [
+            "_id": courseId,
+            "measures": measures
+        ]
 
         // 3. Sérialisation avec gestion d'erreur explicite
         let jsonData: Data
@@ -1856,6 +1861,40 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         if self.isDriving && isScreenUnlocked {
             print("📱 [Distraction] Conduite active + Écran déverrouillé. Lancement des capteurs.")
             self.startDistractionDetection()
+        }
+    }
+
+
+
+    struct MongoIdGenerator {
+        private static var counter: UInt32 = UInt32.random(in: 0...0xFFFFFF)
+        private static let lock = NSLock()
+        private static let randomBytes: [UInt8] = {
+            var bytes = [UInt8](repeating: 0, count: 5)
+            _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+            return bytes
+        }()
+
+        /// Génère une chaîne de 24 caractères hexadécimaux conforme au format ObjectId MongoDB
+        static func generateObjectId() -> String {
+            // 1. Timestamp UNIX sur 4 octets
+            let timestamp = UInt32(Date().timeIntervalSince1970)
+            
+            // 2. Compteur sur 3 octets (thread-safe)
+            lock.lock()
+            counter = (counter + 1) & 0xFFFFFF
+            let count = counter
+            lock.unlock()
+
+            // 3. Assemblage des 12 octets : 4 (time) + 5 (random) + 3 (counter)
+            var bytes = [UInt8]()
+            bytes.append(contentsOf: withUnsafeBytes(of: timestamp.bigEndian) { Array($0) })
+            bytes.append(contentsOf: randomBytes)
+            bytes.append(UInt8((count >> 16) & 0xFF))
+            bytes.append(UInt8((count >> 8) & 0xFF))
+            bytes.append(UInt8(count & 0xFF))
+
+            return bytes.map { String(format: "%02x", $0) }.joined()
         }
     }
 
