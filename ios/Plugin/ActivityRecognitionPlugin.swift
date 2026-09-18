@@ -216,7 +216,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
             let data = formatActivityData(type: "stationary", transition: "ENTER")
             saveLocationToJSON(data)
-            self.notifyListeners("activityChange", data: data)
+            self.notifyListenersSafely("activityChange", data: data)
             
             self.lastSavedActivityType = currentType
             return
@@ -254,7 +254,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
             let exitData = formatActivityData(type: old, transition: "EXIT")
             saveLocationToJSON(exitData)
-            self.notifyListeners("activityChange", data: exitData)
+            self.notifyListenersSafely("activityChange", data: exitData)
         }
 
         self.lastSavedActivityType = currentType
@@ -263,7 +263,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
         let enterData = formatActivityData(type: currentType, transition: "ENTER")
         saveLocationToJSON(enterData)
-        self.notifyListeners("activityChange", data: enterData)
+        self.notifyListenersSafely("activityChange", data: enterData)
     }
 
     // --- 3. Format entry ---
@@ -668,7 +668,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
                 self.logToFile("Activitée reçue: automotive ENTER")
 
                 saveLocationToJSON(enterData)
-                self.notifyListeners("activityChange", data: enterData)
+                self.notifyListenersSafely("activityChange", data: enterData)
                 
                 startHighPrecisionGPS()
             }
@@ -755,7 +755,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         self.logToFile("Position reçue")
 
         saveLocationToJSON(newPoint)
-        self.notifyListeners("onLocationUpdate", data: newPoint)
+        self.notifyListenersSafely("onLocationUpdate", data: newPoint)
     }
 
    
@@ -802,7 +802,7 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         self.lastWeatherFetchDate = nil
         
         // 5. Notifications
-        self.notifyListeners("activityChange", data: exitData)
+        self.notifyListenersSafely("activityChange", data: exitData)
         if debugMode { self.triggerVibration(double: false) }
 
         // 6. upload with small delay
@@ -1898,6 +1898,23 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
         }
     }
 
+}
+
+extension CAPPlugin {
+    /// Envoie une notification à Capacitor de manière asynchrone et sécurisée,
+    /// uniquement si la WebView est prête à recevoir du JavaScript.
+    func notifyListenersSafely(_ changeName: String, data: [String: Any]?) {
+        // 1. Vérifier si la WebView existe et n'est pas en train de charger
+        guard let webView = self.bridge?.webView, !webView.isLoading else {
+            print("⚠️ [Capacitor] Notification \(changeName) ignorée : la WebView n'est pas prête ou est en tâche de fond.")
+            return
+        }
+        
+        // 2. Exécuter l'envoi sur le thread principal sans bloquer le thread de capture (GPS/Mouvement)
+        DispatchQueue.main.async { [weak self] in
+            self?.notifyListeners(changeName, data: data)
+        }
+    }
 }
 
 /*
