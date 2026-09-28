@@ -4,6 +4,8 @@ import CoreMotion
 import CoreLocation
 import UIKit
 import AudioToolbox
+import CryptoKit
+
 
 @objc(ActivityRecognitionPlugin)
 public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
@@ -1414,7 +1416,6 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             return
         }
 
-        let courseId = MongoIdGenerator.generateObjectId()
 
         // 2. Préparation et NETTOYAGE du payload
         let measures = points.compactMap { (dict) -> [String: Any]? in
@@ -1454,6 +1455,16 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
             completion(true)
             return
         }
+
+        guard let firstPoint = measures.first, let firstTimestamp = firstPoint["timestamp"] as? Int64 else {
+            print("❌ Impossible de déterminer le timestamp de départ.")
+            completion(false)
+            return
+        }
+        
+        // Génération de l'ID déterministe (Le même trajet aura TOUJOURS le même ID)
+        let courseId = MongoIdGenerator.generateDeterministicObjectId(from: firstTimestamp)
+
 
         let payload: [String: Any] = [
             "_id": courseId,
@@ -1867,34 +1878,25 @@ public class ActivityRecognitionPlugin: CAPPlugin, CLLocationManagerDelegate {
 
 
     struct MongoIdGenerator {
-        private static var counter: UInt32 = UInt32.random(in: 0...0xFFFFFF)
-        private static let lock = NSLock()
-        private static let randomBytes: [UInt8] = {
-            var bytes = [UInt8](repeating: 0, count: 5)
-            _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-            return bytes
-        }()
+        /// Génère un ObjectId déterministe (24 caractères hexadécimaux) basé sur un timestamp unique
+        static func generateDeterministicObjectId(from firstPointTimestamp: Int64) -> String {
+            // 1. Timestamp UNIX sur 4 octets (Big Endian pour correspondre au format standard)
+            let timestampSec = UInt32(firstPointTimestamp / 1000)
+            let timePart = String(format: "%08x", timestampSec.bigEndian)
 
-        /// Génère une chaîne de 24 caractères hexadécimaux conforme au format ObjectId MongoDB
-        static func generateObjectId() -> String {
-            // 1. Timestamp UNIX sur 4 octets
-            let timestamp = UInt32(Date().timeIntervalSince1970)
+            // 2. Hash MD5 stable basé sur la chaîne du timestamp d'origine pour combler les 16 caractères restants
+            let tsString = String(firstPointTimestamp)
+            guard let data = tsString.data(using: .utf8) else {
+                // Repli de sécurité au cas où (24 caractères hexadécimaux)
+                return String(format: "%024llx", firstPointTimestamp)
+            }
             
-            // 2. Compteur sur 3 octets (thread-safe)
-            lock.lock()
-            counter = (counter + 1) & 0xFFFFFF
-            let count = counter
-            lock.unlock()
+            let digest = Insecure.MD5.hash(data: data)
+            
+            // Prendre les 8 premiers octets du hash (16 caractères hexadécimaux)
+            let hashPart = digest.prefix(8).map { String(format: "%02x", $0) }.joined()
 
-            // 3. Assemblage des 12 octets : 4 (time) + 5 (random) + 3 (counter)
-            var bytes = [UInt8]()
-            bytes.append(contentsOf: withUnsafeBytes(of: timestamp.bigEndian) { Array($0) })
-            bytes.append(contentsOf: randomBytes)
-            bytes.append(UInt8((count >> 16) & 0xFF))
-            bytes.append(UInt8((count >> 8) & 0xFF))
-            bytes.append(UInt8(count & 0xFF))
-
-            return bytes.map { String(format: "%02x", $0) }.joined()
+            return timePart + hashPart
         }
     }
 

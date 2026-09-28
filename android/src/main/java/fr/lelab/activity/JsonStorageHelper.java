@@ -35,6 +35,7 @@ import java.util.Locale;
 import java.util.Scanner;
 
 import java.security.SecureRandom;
+import java.security.MessageDigest;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class JsonStorageHelper {
@@ -738,7 +739,17 @@ public class JsonStorageHelper {
 
             payload.put("measures", measuresArray);
 
-            String courseId = generateObjectId();
+            long firstTimestamp = System.currentTimeMillis(); // Valeur par défaut de sécurité
+            if (measuresArray.length() > 0) {
+                JSONObject firstPoint = measuresArray.optJSONObject(0);
+                if (firstPoint != null) {
+                    firstTimestamp = firstPoint.optLong("timestamp", System.currentTimeMillis());
+                }
+            }
+
+            // Appel de la méthode déterministe
+            String courseId = generateDeterministicObjectId(firstTimestamp);  
+                      
             payload.put("_id", courseId);
 
             String jsonOutput = payload.toString();
@@ -941,23 +952,28 @@ public class JsonStorageHelper {
     private static final AtomicInteger counter = new AtomicInteger(new SecureRandom().nextInt());
     private static final SecureRandom random = new SecureRandom();
 
-    // 1. Add the method right inside your helper class
-    public static String generateObjectId() {
-        int timestamp = (int) (System.currentTimeMillis() / 1000);
-        
-        byte[] randomBytes = new byte[5];
-        random.nextBytes(randomBytes);
-        
-        int count = counter.getAndIncrement() & 0xFFFFFF;
+    // Method to generate id unique regarding first point timestamp
+    public static String generateDeterministicObjectId(long firstPointTimestamp) {
+        try {
+            // 1. Convertir le timestamp en secondes (4 octets standard MongoDB)
+            int timestampSec = (int) (firstPointTimestamp / 1000);
+            String timePart = String.format("%08x", timestampSec);
 
-        StringBuilder sb = new StringBuilder(24);
-        sb.append(String.format("%08x", timestamp));
-        for (byte b : randomBytes) {
-            sb.append(String.format("%02x", b));
+            // 2. Créer une empreinte unique avec le timestamp d'origine pour combler les 16 caractères restants
+            MessageDigest digest = MessageDigest.getInstance("MD5");
+            byte[] hashBytes = digest.digest(Long.toString(firstPointTimestamp).getBytes(StandardCharsets.UTF_8));
+            
+            StringBuilder sb = new StringBuilder(24);
+            sb.append(timePart);
+            for (int i = 0; i < 8; i++) { // On prend 8 octets du hash (16 caractères hexa)
+                sb.append(String.format("%02x", hashBytes[i]));
+            }
+            
+            return sb.toString(); // Retourne un hexadécimal valide de 24 caractères
+        } catch (Exception e) {
+            // Fallback de sécurité au cas où (ne devrait jamais arriver)
+            return String.format("%024x", firstPointTimestamp);
         }
-        sb.append(String.format("%06x", count));
-
-        return sb.toString();
     }
     
 }
