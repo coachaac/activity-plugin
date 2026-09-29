@@ -130,12 +130,12 @@ public class JsonStorageHelper {
                 location.put("weather", weather);
             }
 
-            if (appUsed != null) {
-                location.put("appUsed", appUsed);
-            }
-
             if (!getLockStatus()){
                 location.put("phoneUnlock", true);
+
+                if (appUsed != null) {
+                    location.put("appUsed", appUsed);
+                }
             }
 
             if (isDistraction != null){
@@ -144,6 +144,8 @@ public class JsonStorageHelper {
 
 
             String entry = location.toString() + "\n";
+
+            Log.i(TAG, "Location " + entry);
 
             try (FileOutputStream fos = new FileOutputStream(file, true)) {
                 fos.write(entry.getBytes());
@@ -472,11 +474,19 @@ public class JsonStorageHelper {
                             if (current.has("appUsed") && !current.isNull("appUsed")) {
                                 JSONObject appUsedData = current.optJSONObject("appUsed");
                                 if (appUsedData != null) {
-                                    JSONObject appUsedPoint = new JSONObject();
-                                    appUsedPoint.put("type", appUsedData.optString("name"));
-                                    appUsedPoint.put("accuracy", 1);
                                     
-                                    measure.put("appUsed", appUsedPoint);
+                                    Log.d(TAG, "✅ appUsedData" + appUsedData);
+                                    JSONObject usedApp = appUsedData.optJSONObject("usedApp");
+                                    Log.d(TAG, "✅ usedApp" + usedApp);
+
+                                    if (usedApp != null) {
+                                        JSONObject appUsedPoint = new JSONObject();
+                                        appUsedPoint.put("type", usedApp.optString("name"));
+                                        appUsedPoint.put("accuracy", 1);
+                                        
+                                        measure.put("appUsed", appUsedPoint);
+                                    }
+                                    
                                 }
                             }
 
@@ -711,7 +721,7 @@ public class JsonStorageHelper {
                     if (isPhoneUnlocked) {
                         if (appUsed != null) {
                             JSONObject appUsedPoint = new JSONObject();
-                            appUsedPoint.put("type", appUsed.optString("name"));
+                            appUsedPoint.put("type", appUsed.optString("type"));
                             appUsedPoint.put("accuracy", appUsed.optDouble("accuracy"));
                             
                             point.put("appUsed", appUsedPoint);

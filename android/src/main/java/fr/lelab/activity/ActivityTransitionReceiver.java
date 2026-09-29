@@ -130,6 +130,9 @@ public class ActivityTransitionReceiver extends BroadcastReceiver {
             JsonStorageHelper.scheduleNextWeatherUpdate(context);
 
             ActivityRecognition.startDistractionFromReceiver(context);
+
+            ActivityRecognition.checkScreenUnlockAtAutomotiveStart(context);
+
         } 
         else if (
             (DetectedActivity.IN_VEHICLE == activityType && transitionType == ActivityTransition.ACTIVITY_TRANSITION_EXIT) 

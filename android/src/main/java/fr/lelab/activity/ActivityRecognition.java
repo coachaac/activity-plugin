@@ -122,7 +122,7 @@ public class ActivityRecognition {
                     // 2. Si oui, on peut chercher l'application au premier plan
                     if (isGranted) {
                         Log.d(TAG, "✅ Autorisation UsageStats granted. Try to get active app...");
-                        String appActive = ForegroundAppDetector.getForegroundApp(context);
+                        String appActive = ForegroundAppDetector.saveForegroundApp(context);
                         
                         // Optionnel : vous pouvez stocker l'application active ou lever un drapeau ici
                     } else {
@@ -233,6 +233,52 @@ public class ActivityRecognition {
             Log.i("ActivityRecognition", "🚶 Sortie de véhicule détectée : Arrêt des capteurs de distraction.");
             distractionEmitter.stopMonitoring();
             distractionEmitter = null;
+        }
+    }
+
+ 
+    public static void checkScreenUnlockAtAutomotiveStart(Context context) {
+        // Récupération du gestionnaire de l'écran de verrouillage
+        android.app.KeyguardManager km = (android.app.KeyguardManager) context.getSystemService(Context.KEYGUARD_SERVICE);
+        
+        boolean isDeviceLocked = true; // Par défaut, on considère qu'il est verrouillé
+
+        if (km != null) {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                // isDeviceLocked() renvoie true si un code/schéma/biométrie bloque l'appareil.
+                // isKeyguardLocked() renvoie true si le lockscreen (même un simple swipe) est affiché.
+                isDeviceLocked = km.isKeyguardLocked(); 
+            } else {
+                // Rétrocompatibilité pour les anciennes versions d'Android
+                isDeviceLocked = km.inKeyguardRestrictedInputMode();
+            }
+        }
+
+        boolean isUnlocked = !isDeviceLocked;
+        Log.d(TAG, "🚗 Start Automotive - Téléphone déverrouillé ? " + isUnlocked);
+
+        // Initialisation immédiate de votre stockage
+        JsonStorageHelper.setLockStatus(isDeviceLocked); // Déverrouillé = false, Verrouillé = true
+
+        if (isUnlocked) {
+            executeForegroundAppDetection(context);
+        }
+        
+    }
+
+
+    private static void executeForegroundAppDetection(Context context) {
+        android.app.AppOpsManager appOps = (android.app.AppOpsManager) context.getSystemService(Context.APP_OPS_SERVICE);
+        int mode = appOps.checkOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, 
+                android.os.Process.myUid(), context.getPackageName());
+        
+        boolean isGranted = (mode == android.app.AppOpsManager.MODE_ALLOWED);
+
+        if (isGranted) {
+            Log.d(TAG, "✅ UsageStats granted. Fetching active app...");
+            String appActive = ForegroundAppDetector.saveForegroundApp(context);
+        } else {
+            Log.w(TAG, "⚠️ Unable to get active application : Autorisation missing (denied)");
         }
     }
 

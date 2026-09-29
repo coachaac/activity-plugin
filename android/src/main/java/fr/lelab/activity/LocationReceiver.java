@@ -10,6 +10,9 @@ import com.getcapacitor.JSObject;
 import com.google.android.gms.location.LocationResult;
 
 public class LocationReceiver extends BroadcastReceiver {
+
+    private static final String TAG = "LocationReceiver";
+
     @Override
     public void onReceive(Context context, Intent intent) {
         if (intent == null || !LocationResult.hasResult(intent)) return;
@@ -26,9 +29,28 @@ public class LocationReceiver extends BroadcastReceiver {
         JSObject currentWeather = JsonStorageHelper.getLastWeather();
 
         // retrieve last forground App
+        // 1. On vérifie d'abord si l'utilisateur a donné l'autorisation
+        android.app.AppOpsManager appOps = (android.app.AppOpsManager) context.getSystemService(Context.APP_OPS_SERVICE);
+        int mode = appOps.checkOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, 
+                android.os.Process.myUid(), context.getPackageName());
+        
+        boolean isGranted = (mode == android.app.AppOpsManager.MODE_ALLOWED);
+
+        // 2. Si oui, on peut chercher l'application au premier plan
+        if (isGranted) {
+            Log.d(TAG, "✅ Autorisation UsageStats granted. Try to get active app...");
+            String appActive = ForegroundAppDetector.saveForegroundApp(context);
+        } else {
+            Log.w(TAG, "⚠️ Unable to get active application : Autorisation missing (denied)");
+        }
+        
         JSObject appForegroundData = JsonStorageHelper.getLastForegroundApp();
 
+        if (appForegroundData != null)
+            Log.d("appForegroundData: ", appForegroundData.toString());
+
         boolean isDistractionActive = DistractionEventEmitter.getCurrentlyDistracted();
+
 
         for (Location location : locationResult.getLocations()) {
 
@@ -55,7 +77,7 @@ public class LocationReceiver extends BroadcastReceiver {
             JSObject data = JsonStorageHelper.locationToJSObject(location);
             ActivityRecognitionPlugin.onLocationEvent(data);
             
-            Log.d("Position", "📍 GPS Point saved : " + location.getLatitude() + "," + location.getLongitude() + (currentWeather != null ? " (with weather)" : ""));
+            Log.d("Position", "📍 GPS Point saved : " + location.getLatitude() + "," + location.getLongitude() + (currentWeather != null ? " (with weather)" : "")+ (appForegroundData != null ? " (with appForegroundData)" : ""));
         }
     }
 }
